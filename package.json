@@ -1,0 +1,10 @@
+{
+  "name": "solana-meme-sniper-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Guarded Solana meme coin Telegram trading bot with Jupiter execution.",
+  "main": "index.js",
+  "scripts": { "start": "node index.js", "check": "node --check index.js && node --check config.js && find bot services utils -name '*.js' -print0 | xargs -0 -n1 node --check" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "@solana/web3.js": "^1.98.4", "axios": "^1.8.4", "bs58": "^6.0.0", "dotenv": "^16.4.7", "express": "^4.21.2", "grammy": "^1.35.0" }
+}
