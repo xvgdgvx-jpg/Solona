@@ -18,6 +18,15 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
   return data;
 }
 
+async function getTokenAmount({ rpcUrl, ownerSecret, mint, uiAmount }) {
+  const wallet = keypairFromSecret(ownerSecret);
+  const accounts = await connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) });
+  const account = accounts.value.find(({ account }) => Number(account.data.parsed.info.tokenAmount.uiAmount || 0) >= uiAmount);
+  if (!account) throw new Error('Insufficient token balance');
+  const info = account.account.data.parsed.info.tokenAmount;
+  return { raw: Math.round(uiAmount * (10 ** info.decimals)), decimals: info.decimals };
+}
+
 async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading }) {
   const wallet = keypairFromSecret(secret);
   if (!liveTrading) return { simulated: true, wallet: wallet.publicKey.toBase58(), message: 'Dry run only: set LIVE_TRADING=true after independent review to enable execution.' };
@@ -37,4 +46,4 @@ async function getPortfolio({ rpcUrl, secret }) {
   return { address: wallet.publicKey.toBase58(), sol: balance / 1e9, tokens: tokens.value.map(({ account }) => account.data.parsed.info.tokenAmount).filter((x) => Number(x.uiAmount) > 0) };
 }
 
-module.exports = { SOL_MINT, keypairFromSecret, getQuote, executeSwap, getPortfolio };
+module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, executeSwap, getPortfolio };

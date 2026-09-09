@@ -1,6 +1,6 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const config = require('../config');
-const { getQuote, executeSwap, getPortfolio, SOL_MINT } = require('../services/solana');
+const { getQuote, getTokenAmount, executeSwap, getPortfolio, SOL_MINT } = require('../services/solana');
 const { getUser, saveUser } = require('../services/storage');
 
 const bot = new Bot(config.token);
@@ -24,7 +24,9 @@ async function trade(ctx, side) {
   const amountSol = Number(amountText);
   if (!mint || !Number.isFinite(amountSol) || amountSol <= 0 || amountSol > 10) return ctx.reply(`Usage: /${side} <TOKEN_MINT> <SOL_AMOUNT>, max 10 SOL per request.`);
   try {
-    const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: mint, amountLamports: Math.round(amountSol * 1e9), slippageBps: 100 });
+    const tokenSide = side === 'sell';
+    const amount = tokenSide ? await getTokenAmount({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint, uiAmount: amountSol }) : { raw: Math.round(amountSol * 1e9) };
+    const quote = await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: tokenSide ? mint : SOL_MINT, outputMint: tokenSide ? SOL_MINT : mint, amountLamports: amount.raw, slippageBps: 100 });
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: config.liveTrading });
     await ctx.reply(result.simulated ? `DRY RUN ${side.toUpperCase()}\nWallet: ${result.wallet}\nNo transaction was sent.` : `${side.toUpperCase()} confirmed\nSignature: ${result.signature}\n${explorer(result.signature)}`);
   } catch (e) { await ctx.reply(`Trade rejected: ${e.message}`); }
