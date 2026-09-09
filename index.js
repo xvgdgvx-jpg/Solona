@@ -10,7 +10,23 @@ const server = app.listen(config.port, () => console.log(`Health server listenin
 const keepAlive = setInterval(() => axios.get(config.keepAliveUrl, { timeout: 8000 }).catch(() => {}), 600000);
 keepAlive.unref();
 
-bot.start().then(() => console.log('Telegram bot started')).catch((error) => { console.error('Bot startup failed:', error); process.exitCode = 1; });
+let botStarting = false;
+let botReady = false;
+const startBot = async () => {
+  if (botStarting || botReady) return;
+  botStarting = true;
+  try {
+    await bot.start();
+    botReady = true;
+    console.log('Telegram bot started');
+  } catch (error) {
+    console.error(`Telegram startup failed; retrying in 30s: ${error.description || error.message}`);
+    setTimeout(startBot, 30000).unref();
+  } finally {
+    botStarting = false;
+  }
+};
+startBot();
 const shutdown = async (signal) => { console.log(`${signal}: shutting down`); clearInterval(keepAlive); await bot.stop(); server.close(() => process.exit(0)); };
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));

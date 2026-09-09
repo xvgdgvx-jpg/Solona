@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { Connection, Keypair, PublicKey, VersionedTransaction } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58Module = require('bs58');
+const bs58 = bs58Module.default || bs58Module;
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const connection = (rpcUrl) => new Connection(rpcUrl, 'confirmed');
