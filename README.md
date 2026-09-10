@@ -18,6 +18,10 @@ The optional Pump.fun watcher polls recent launches every 30 seconds. It is disa
 
 The watcher is a risk-control feature, not a guarantee of fills or profitability. Pump.fun bonding-curve price impact, fees, migration to PumpSwap, RPC delay, slippage, and malicious launches can cause losses. Keep dry-run mode enabled until the filters and alerts are independently verified.
 
+## Paper Trading
+
+When live trading is disabled, `/buy` does not submit a transaction. Instead, it uses a real Jupiter quote for the selected Pump.fun mint, records a virtual position in encrypted storage, and values it again from a live token-to-SOL quote. Use `/pnl` to refresh open positions; the bot reports invested SOL, current SOL value, percentage PnL, and USD PnL when the live SOL/USD reference is available. Each simulated position includes buttons for live refresh, simulated 50% sale, and simulated 100% sale. Auto-sniper candidates are tracked the same way while `liveTrading` is off. This is market-data simulation, not a guarantee of execution price or fill.
+
 ## Commands
 
 `/start` and `/menu` open the single inline-keyboard dashboard. `/wallet` shows the configured wallet address. `/portfolio` reads SOL and non-zero token accounts. `/snipe` and `/settings` are admin-only. Admin trading uses `/buy <TOKEN_MINT> <SOL_AMOUNT>` and `/sell <TOKEN_MINT> <SOL_AMOUNT>`; the current implementation uses Jupiter exact-in quotes and a bounded 10 SOL request limit.
