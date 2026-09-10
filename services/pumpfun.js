@@ -260,9 +260,12 @@ class PumpFunWatcher {
     const ageSeconds = candidate.createdAt
       ? (Date.now() / 1000) - Number(candidate.createdAt)
       : 0;
-    const minAgeSec = Number(s.minTokenAgeSec ?? 45);
-    if (ageSeconds > 0 && ageSeconds < minAgeSec)
+    const minAgeSec = Number(s.minTokenAgeSec ?? 30);
+    if (ageSeconds > 0 && minAgeSec > 0 && ageSeconds < minAgeSec)
       return `عمر ${ageSeconds.toFixed(0)}ث أقل من ${minAgeSec}ث`;
+    const maxAgeSec = Number(s.maxTokenAgeSec ?? 0);
+    if (ageSeconds > 0 && maxAgeSec > 0 && ageSeconds > maxAgeSec)
+      return `عمر ${ageSeconds.toFixed(0)}ث أكبر من ${maxAgeSec}ث`;
 
     if (!candidate.name) return 'اسم العملة فارغ';
 
@@ -293,10 +296,10 @@ class PumpFunWatcher {
     if (candidate.liquiditySol < minLiq)
       return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
 
-    const minMcap = Number(s.minMarketCapUsd ?? 5000);
+    const minMcap = Number(s.minMarketCapUsd ?? 0);
     const maxMcap = Number(s.maxMarketCapUsd ?? 80000);
     if (candidate.marketCapUsd > 0) {
-      if (candidate.marketCapUsd < minMcap)
+      if (minMcap > 0 && candidate.marketCapUsd < minMcap)
         return `MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
       if (maxMcap > 0 && candidate.marketCapUsd > maxMcap)
         return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
