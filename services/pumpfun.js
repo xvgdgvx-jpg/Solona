@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
 
-const DEFAULT_URL = 'https://frontend-api.pump.fun/coins';
+const DEFAULT_URLS = ['https://frontend-api-v3.pump.fun/coins', 'https://frontend-api.pump.fun/coins'];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class PumpFunWatcher {
@@ -15,16 +15,25 @@ class PumpFunWatcher {
     this.lastPollAt = null;
     this.lastCandidate = null;
     this.lastError = null;
+    this.source = process.env.PUMPFUN_API_URL || DEFAULT_URLS[0];
   }
   updateSettings(settings) { this.settings = settings; }
   start() { if (!this.running) { this.running = true; this.loop(); } }
   stop() { this.running = false; }
-  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastCandidate: this.lastCandidate, lastError: this.lastError }; }
+  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastCandidate: this.lastCandidate, lastError: this.lastError, source: this.source }; }
   async loop() {
     while (this.running) {
       try {
         this.lastPollAt = new Date().toISOString();
-        const { data } = await axios.get(process.env.PUMPFUN_API_URL || DEFAULT_URL, { params: { offset: 0, limit: 25, sort: 'created_timestamp', order: 'DESC', includeNsfw: false }, timeout: 10000 });
+        const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
+        let response;
+        let lastError;
+        for (const url of urls) {
+          try { response = await axios.get(url, { params: { offset: 0, limit: 25, sort: 'created_timestamp', order: 'DESC', includeNsfw: false }, timeout: 10000 }); this.source = url; break; }
+          catch (error) { lastError = error; }
+        }
+        if (!response) throw lastError;
+        const { data } = response;
         this.lastError = null;
         const coins = Array.isArray(data) ? data : (data.coins || data.data || []);
         for (const coin of coins.reverse()) {
