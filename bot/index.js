@@ -27,7 +27,7 @@ bot.command('wallet', async (ctx) => { try { await ctx.reply(`عنوان الم�
 bot.command('portfolio', async (ctx) => { try { const p = await getPortfolio({ rpcUrl: config.rpcUrl, secret: userSecret() }); await ctx.reply(`المحفظة الاستثمارية\nالعنوان: ${p.address}\nرصيد SOL: ${p.sol.toFixed(4)}\nحسابات العملات غير الفارغة: ${p.tokens.length}`); } catch (e) { await ctx.reply(`تعذر تحميل المحفظة الاستثمارية.\n${e.message}`); } });
 bot.command('pnl', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('صلاحية المشرف مطلوبة.'); await sendPnl(ctx); });
 
-function settingsText(s) { return `الإعدادات الديناميكية\nمراقبة Pump.fun: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nالقنص التجريبي: ${s.paperTradingEnabled ? 'مفعّل — شراء وبيع افتراضي' : 'متوقف'}\nالتداول الحقيقي الفعلي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'معطّل — لا تُرسل معاملات'}\nالسماح من إعدادات البوت: ${s.liveTrading ? 'مفعّل' : 'معطّل'}\nحاجز البيئة LIVE_TRADING: ${config.liveTrading ? 'مفعّل' : 'معطّل'}\nحجم الصفقة: ${s.tradeSizeSol} SOL\nالحد الأقصى للصفقات اليومية: ${s.maxTradesPerDay || 'غير محدود'}\nالحد الأدنى للسيولة: ${s.minLiquiditySol || 'بدون حد'} SOL\nالحد الأقصى للقيمة السوقية: ${s.maxMarketCapUsd || 'بدون حد'} USD\nاشتراط تعطيل Mint/Freeze Authority: ${s.requireRenouncedAuthorities ? 'نعم' : 'لا'}\n\nأوامر التعديل:\n/settings live on|off\n/settings sniper on|off\n/settings paper on|off\n/settings size <SOL>\n/settings maxtrades <عدد أو 0>\n/settings minliq <SOL>\n/settings maxcap <USD>\n/settings authorities on|off`;
+function settingsText(s) { return `الإعدادات الديناميكية\nمراقبة Pump.fun: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nالقنص التجريبي: ${s.paperTradingEnabled ? 'مفعّل — شراء وبيع افتراضي' : 'متوقف'}\nهدف البيع التلقائي: +${s.paperTakeProfitPct}%\nالتداول الحقيقي الفعلي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'معطّل — لا تُرسل معاملات'}\nالسماح من إعدادات البوت: ${s.liveTrading ? 'مفعّل' : 'معطّل'}\nحاجز البيئة LIVE_TRADING: ${config.liveTrading ? 'مفعّل' : 'معطّل'}\nحجم الصفقة: ${s.tradeSizeSol} SOL\nالحد الأقصى للصفقات اليومية: ${s.maxTradesPerDay || 'غير محدود'}\nالحد الأدنى للسيولة: ${s.minLiquiditySol || 'بدون حد'} SOL\nالحد الأقصى للقيمة السوقية: ${s.maxMarketCapUsd || 'بدون حد'} USD\nاشتراط تعطيل Mint/Freeze Authority: ${s.requireRenouncedAuthorities ? 'نعم' : 'لا'}\n\nأوامر التعديل:\n/settings live on|off\n/settings sniper on|off\n/settings paper on|off\n/settings takeprofit <٪>\n/settings size <SOL>\n/settings maxtrades <عدد أو 0>\n/settings minliq <SOL>\n/settings maxcap <USD>\n/settings authorities on|off`;
 }
 bot.command('settings', async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.');
@@ -40,11 +40,12 @@ bot.command('settings', async (ctx) => {
     else if (key === 'sniper') s.autoSniperEnabled = bool;
     else if (key === 'authorities') s.requireRenouncedAuthorities = bool;
     else if (key === 'paper') s.paperTradingEnabled = bool;
+    else if (key === 'takeprofit' && Number(value) > 0) s.paperTakeProfitPct = Number(value);
     else if (key === 'size' && Number(value) > 0) s.tradeSizeSol = Number(value);
     else if (key === 'maxtrades' && Number(value) >= 0) s.maxTradesPerDay = Number(value);
     else if (key === 'minliq' && Number(value) >= 0) s.minLiquiditySol = Number(value);
     else if (key === 'maxcap' && Number(value) >= 0) s.maxMarketCapUsd = Number(value);
-    else if (!['live', 'sniper', 'paper', 'authorities', 'size', 'maxtrades', 'minliq', 'maxcap'].includes(key)) return ctx.reply('إعداد غير معروف.');
+    else if (!['live', 'sniper', 'paper', 'takeprofit', 'authorities', 'size', 'maxtrades', 'minliq', 'maxcap'].includes(key)) return ctx.reply('إعداد غير معروف.');
     saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); if (s.autoSniperEnabled) watcher.start(); else watcher.stop();
   }
   await ctx.reply(settingsText(s));
@@ -108,6 +109,7 @@ bot.callbackQuery(/^p:(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); 
 bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const id = paperTokens.get(ctx.match[1]); const fraction = ctx.match[2]; if (!id) return ctx.reply('انتهت صلاحية هذا الزر. استخدم /pnl من جديد.'); try { const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: id, fraction: Number(fraction), jupiterUrl: config.jupiterUrl }); await ctx.reply(`تمت محاكاة البيع بنسبة ${Number(fraction) * 100}٪\nالقيمة: ${result.currentSol.toFixed(6)} SOL\nPnL: ${result.pnlSol >= 0 ? '+' : ''}${result.pnlSol.toFixed(6)} SOL (${result.pnlPct.toFixed(2)}٪)`); } catch (error) { await ctx.reply(`تعذر محاكاة البيع.\n${error.message}`); } });
 
 let lastSniperErrorAt = 0;
+let paperMonitorBusy = false;
 const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   if (!s.autoSniperEnabled) return;
@@ -116,8 +118,9 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   try {
     const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(s.tradeSizeSol * 1e9), slippageBps: 100 });
     if (!effectiveLiveTrading(s)) {
-      const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: s.tradeSizeSol, quote });
+      const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: s.tradeSizeSol, quote, metadata: candidate });
       s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+      await bot.api.sendMessage(config.adminId, `شراء تجريبي مؤهل\nالاسم: ${candidate.name}\nالرمز: ${candidate.symbol}\nالعنوان: ${candidate.mint}\nالسيولة: ${candidate.liquiditySol.toFixed(2)} SOL\nالقيمة السوقية: ${candidate.marketCapUsd.toFixed(2)} USD\nالمبلغ: ${s.tradeSizeSol} SOL\nالكمية الافتراضية: ${quote.outAmount}\nهدف البيع التلقائي: +${s.paperTakeProfitPct}%`);
       return;
     }
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s) });
@@ -126,6 +129,21 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
   } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
 }});
+async function monitorPaperPositions() {
+  const s = settingsForAdmin();
+  if (paperMonitorBusy || !s.paperTradingEnabled || effectiveLiveTrading(s)) return;
+  paperMonitorBusy = true;
+  try {
+    const { values } = await refreshPositions({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
+    for (const value of values) {
+      if (value.pricingError || value.pnlPct < Number(s.paperTakeProfitPct || 50)) continue;
+      const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction: 1, jupiterUrl: config.jupiterUrl });
+      await bot.api.sendMessage(config.adminId, `بيع تجريبي تلقائي\nالاسم: ${value.name}\nالرمز: ${value.symbol}\nالعنوان: ${value.mint}\nالكمية المباعة: ${value.tokenAmountRaw}\nسعر/قيمة البيع: ${sold.currentSol.toFixed(6)} SOL\nالربح: +${sold.pnlSol.toFixed(6)} SOL (${sold.pnlPct.toFixed(2)}٪)\nتم البيع عند بلوغ هدف +${s.paperTakeProfitPct}٪.`);
+    }
+  } catch (error) { console.error(`Paper position monitor error: ${error.message}`); }
+  finally { paperMonitorBusy = false; }
+}
+setInterval(monitorPaperPositions, 30000);
 function startWatcher() { if (settingsForAdmin().autoSniperEnabled) { console.log('Pump.fun watcher started; polling every 30 seconds'); watcher.start(); } }
 module.exports = bot;
 module.exports.startWatcher = startWatcher;

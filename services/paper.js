@@ -8,13 +8,13 @@ const savePositions = (adminId, positions, key) => { const user = getUser(adminI
 async function solUsd() {
   try { const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 }); return Number(data.solana.usd); } catch { return null; }
 }
-async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote }) {
+async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote, metadata = {} }) {
   const positions = getPositions(adminId, key);
   const outAmount = Number(quote.outAmount);
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
   const existing = positions.find((p) => p.mint === mint && p.status === 'open');
   if (existing) { existing.investedSol += investedSol; existing.tokenAmountRaw += outAmount; existing.updatedAt = Date.now(); }
-  else positions.push({ id: `${mint}:${Date.now()}`, mint, investedSol, tokenAmountRaw: outAmount, decimals: 0, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
+  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, decimals: 0, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
   savePositions(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }

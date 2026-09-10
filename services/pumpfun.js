@@ -63,8 +63,10 @@ class PumpFunWatcher {
   matches(candidate) {
     try { new PublicKey(candidate.mint); } catch { return false; }
     if (this.settings.requireRenouncedAuthorities && (candidate.mintAuthority || candidate.freezeAuthority)) return false;
-    if (this.settings.minLiquiditySol > 0 && candidate.liquiditySol < this.settings.minLiquiditySol) return false;
-    if (this.settings.maxMarketCapUsd > 0 && candidate.marketCapUsd > this.settings.maxMarketCapUsd) return false;
+    const minLiquidity = this.settings.minLiquiditySol > 0 ? this.settings.minLiquiditySol : 5;
+    const maxMarketCap = this.settings.maxMarketCapUsd > 0 ? this.settings.maxMarketCapUsd : 100000;
+    if (candidate.liquiditySol < minLiquidity) return false;
+    if (candidate.marketCapUsd <= 0 || candidate.marketCapUsd > maxMarketCap) return false;
     return true;
   }
 }

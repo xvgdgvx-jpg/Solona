@@ -3,13 +3,14 @@ const { getUser, saveUser } = require('./storage');
 const defaults = {
   autoSniperEnabled: false,
   paperTradingEnabled: true,
+  paperTakeProfitPct: 50,
   liveTrading: false,
   tradeSizeSol: 0.1,
   maxTradesPerDay: 0,
   tradesToday: 0,
   tradeDay: new Date().toISOString().slice(0, 10),
-  minLiquiditySol: 0,
-  maxMarketCapUsd: 0,
+  minLiquiditySol: 5,
+  maxMarketCapUsd: 100000,
   requireRenouncedAuthorities: true,
   lastMint: null
 };
