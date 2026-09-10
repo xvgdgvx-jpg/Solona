@@ -1,18 +1,36 @@
 const express = require('express');
-const axios = require('axios');
+const http = require('node:http');
+const https = require('node:https');
 const config = require('./config');
 const bot = require('./bot');
 
 const app = express();
+const PORT = Number(process.env.PORT || config.port || 3000);
 let botStarting = false;
 let botReady = false;
 let lastBotError = null;
 let shuttingDown = false;
-app.get('/health', (_req, res) => res.json({ status: botReady ? 'ok' : 'degraded', uptime: process.uptime(), telegram: botReady ? 'ready' : 'starting-or-retrying', watcher: bot.watcher?.status?.() || null, lastBotError }));
-const server = app.listen(config.port, () => console.log(`Health server listening on ${config.port}`));
+app.get('/health', (_req, res) => res.status(200).send('Bot is awake'));
+const server = app.listen(PORT, () => console.log(`Health server listening on ${PORT}`));
 
-const keepAlive = setInterval(() => axios.get(config.keepAliveUrl, { timeout: 8000 }).catch(() => {}), 600000);
-keepAlive.unref();
+const selfPingUrl = process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/health` : `http://localhost:${PORT}/health`;
+function selfPing() {
+  if (shuttingDown) return;
+  try {
+    const target = new URL(selfPingUrl);
+    const transport = target.protocol === 'https:' ? https : http;
+    const request = transport.get(target, { timeout: 10000 }, (response) => {
+      response.resume();
+      console.log(`Self-ping status: ${response.statusCode} (${selfPingUrl})`);
+    });
+    request.on('error', (error) => console.error(`Self-ping error: ${error.message}`));
+    request.on('timeout', () => request.destroy(new Error('Self-ping timeout')));
+  } catch (error) {
+    console.error(`Self-ping URL error: ${error.message}`);
+  }
+}
+const keepAlive = setInterval(selfPing, 14 * 60 * 1000);
+setTimeout(selfPing, 1000).unref();
 const supervisor = setInterval(() => {
   if (!botReady || shuttingDown || !bot.watcher?.status) return;
   const status = bot.watcher.status();
