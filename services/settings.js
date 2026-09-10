@@ -1,7 +1,7 @@
 const { getUser, saveUser } = require('./storage');
 
 const defaults = {
-  autoSniperEnabled: true,
+  autoSniperEnabled: false,
   paperTradingEnabled: true,
   autoSellEnabled: true,
   paperCapitalSol: 1,
