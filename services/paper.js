@@ -4,6 +4,8 @@ const { getUser, saveUser } = require('./storage');
 
 const getPositions = (adminId, key) => getUser(adminId, key).paperPositions || [];
 const savePositions = (adminId, positions, key) => { const user = getUser(adminId, key); saveUser(adminId, { ...user, paperPositions: positions }, key); };
+let priceCache = { data: null, timestamp: 0 };
+const PRICE_CACHE_MS = 500;
 
 async function solUsd() {
   try { const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 }); return Number(data.solana.usd); } catch { return null; }
@@ -33,16 +35,32 @@ async function refreshPositions({ adminId, key, jupiterUrl }) {
   const usd = await solUsd();
   return { values, solUsd: usd };
 }
+async function refreshPositionsCached(params) {
+  const now = Date.now();
+  if (priceCache.data && now - priceCache.timestamp < PRICE_CACHE_MS) return priceCache.data;
+  const result = await refreshPositions(params);
+  priceCache = { data: result, timestamp: now };
+  return result;
+}
 async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUrl }) {
   const positions = getPositions(adminId, key);
   const position = positions.find((p) => p.id === positionId && p.status === 'open');
   if (!position) throw new Error('المركز الافتراضي غير موجود أو مغلق.');
+  if (position.status !== 'open') throw new Error('المركز مغلق مسبقاً');
+  position.status = 'closing';
+  position.updatedAt = Date.now();
+  savePositions(adminId, positions, key);
   const value = await valuePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
-  if (value.pricingError) throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
+  if (value.pricingError) {
+    position.status = 'open';
+    position.updatedAt = Date.now();
+    savePositions(adminId, positions, key);
+    throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
+  }
   if (fraction >= 1) position.status = 'closed';
-  else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; }
+  else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; position.status = 'open'; }
   position.updatedAt = Date.now();
   savePositions(adminId, positions, key);
   return { ...value, fraction };
 }
-module.exports = { openPosition, refreshPositions, closePosition, getPositions };
+module.exports = { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions };
