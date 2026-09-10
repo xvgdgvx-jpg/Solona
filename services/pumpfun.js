@@ -241,7 +241,10 @@ class PumpFunWatcher {
       creator: coin.creator || coin.creator_address || null,
       bondingCurve: coin.bonding_curve || coin.bondingCurve || null,
       socialLinks: [coin.twitter, coin.telegram, coin.website].filter(Boolean),
-      createdAt: coin.created_timestamp || null,
+      createdAt: (() => {
+        const timestamp = Number(coin.created_timestamp ?? coin.createdAt ?? 0);
+        return timestamp > 1e12 ? timestamp / 1000 : timestamp || null;
+      })(),
     };
   }
 
@@ -252,6 +255,14 @@ class PumpFunWatcher {
     try { new PublicKey(candidate.mint); } catch { return 'عنوان Mint غير صالح'; }
 
     const s = this.settings;
+
+    // فلتر العمر — لا تشترِ عملة عمرها أقل من الحد
+    const ageSeconds = candidate.createdAt
+      ? (Date.now() / 1000) - Number(candidate.createdAt)
+      : 0;
+    const minAgeSec = Number(s.minTokenAgeSec ?? 45);
+    if (ageSeconds > 0 && ageSeconds < minAgeSec)
+      return `عمر ${ageSeconds.toFixed(0)}ث أقل من ${minAgeSec}ث`;
 
     if (!candidate.name) return 'اسم العملة فارغ';
 
@@ -278,23 +289,37 @@ class PumpFunWatcher {
     }
     // إن لم تتوفر بيانات → تمرير العملة لباقي الفلاتر
 
-    if (s.minLiquiditySol && candidate.liquiditySol < Number(s.minLiquiditySol))
-      return 'السيولة أقل من الحد';
+    const minLiq = Number(s.minLiquiditySol ?? 1.5);
+    if (candidate.liquiditySol < minLiq)
+      return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
 
-    if (s.maxMarketCapUsd && candidate.marketCapUsd > 0 && candidate.marketCapUsd > Number(s.maxMarketCapUsd))
-      return 'Market Cap تجاوز السقف';
+    const minMcap = Number(s.minMarketCapUsd ?? 5000);
+    const maxMcap = Number(s.maxMarketCapUsd ?? 80000);
+    if (candidate.marketCapUsd > 0) {
+      if (candidate.marketCapUsd < minMcap)
+        return `MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
+      if (maxMcap > 0 && candidate.marketCapUsd > maxMcap)
+        return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
+    }
 
-    const minVol = Number(s.minVolumeUsd ?? 0);
-    if (minVol > 0 && candidate.volumeUsd > 0 && candidate.volumeUsd < minVol)
-      return `حجم التداول ${candidate.volumeUsd.toFixed(0)}$ أقل من ${minVol}$`;
+    const minVol = Number(s.minVolumeUsd ?? 300);
+    if (candidate.volumeUsd < minVol)
+      return `حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
 
-    const minBuyers = Number(s.minUniqueBuyers ?? 0);
-    if (minBuyers > 0 && candidate.uniqueBuyers > 0 && candidate.uniqueBuyers < minBuyers)
-      return `عدد المشترين ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
+    const minBuyers = Number(s.minUniqueBuyers ?? 8);
+    if (candidate.uniqueBuyers < minBuyers)
+      return `مشترون ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
 
-    if (s.requireBuyVolumeDominance && candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0
-        && candidate.buyVolumeUsd <= candidate.sellVolumeUsd)
-      return 'حجم الشراء ليس أكبر من البيع';
+    if (s.requireBuyVolumeDominance) {
+      const buy = candidate.buyVolumeUsd;
+      const sell = candidate.sellVolumeUsd;
+      if (buy > 0 && sell > 0) {
+        const ratio = buy / sell;
+        const minRatio = Number(s.minBuySellRatio ?? 1.5);
+        if (ratio < minRatio)
+          return `نسبة شراء/بيع ${ratio.toFixed(2)} أقل من ${minRatio}`;
+      }
+    }
 
     if (candidate.heliusVerified && !(candidate.creatorHoldingsPct <= Number(s.maxCreatorHoldingsPct ?? 25)))
       return `حيازة المنشئ تتجاوز ${s.maxCreatorHoldingsPct}%`;
