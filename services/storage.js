@@ -14,6 +14,10 @@ function writeUsers(users, key) {
 }
 function getUser(id, key) { return readUsers(key)[String(id)] || { settings: { slippageBps: 100 } }; }
 function saveUser(id, user, key) { const users = readUsers(key); users[String(id)] = user; writeUsers(users, key); }
+function resetSettings(adminId, key) {
+  const user = getUser(adminId, key);
+  saveUser(adminId, { ...user, settings: {} }, key);
+}
 function saveUserSecret(id, secret, key) { const user = getUser(id, key); user.encryptedSecret = encrypt(secret, key); saveUser(id, user, key); }
 function getUserSecret(id, key) { const user = getUser(id, key); return user.encryptedSecret ? decrypt(user.encryptedSecret, key) : null; }
-module.exports = { getUser, saveUser, saveUserSecret, getUserSecret };
+module.exports = { getUser, saveUser, resetSettings, saveUserSecret, getUserSecret };

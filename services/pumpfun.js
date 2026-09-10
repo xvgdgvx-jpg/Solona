@@ -258,62 +258,35 @@ class PumpFunWatcher {
     };
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // filterReason — مع حماية من غياب بيانات المنحنى
-  // ══════════════════════════════════════════════════════════════
   filterReason(candidate) {
     try { new PublicKey(candidate.mint); } catch { return 'عنوان Mint غير صالح'; }
 
     const s = this.settings;
 
-    // فلتر العمر — لا تشترِ عملة عمرها أقل من الحد
-    const ageSeconds = candidate.createdAt
-      ? (Date.now() / 1000) - Number(candidate.createdAt)
-      : 0;
-    const minAgeSec = Number(s.minTokenAgeSec ?? 30);
-    if (ageSeconds > 0 && minAgeSec > 0 && ageSeconds < minAgeSec)
-      return `عمر ${ageSeconds.toFixed(0)}ث أقل من ${minAgeSec}ث`;
-    const maxAgeSec = Number(s.maxTokenAgeSec ?? 0);
-    if (ageSeconds > 0 && maxAgeSec > 0 && ageSeconds > maxAgeSec)
-      return `عمر ${ageSeconds.toFixed(0)}ث أكبر من ${maxAgeSec}ث`;
-
     if (!candidate.name) return 'اسم العملة فارغ';
 
-    if (s.requireSocialLinks && !candidate.socialLinks?.length) return 'رابط تواصل مفقود';
+    if (s.requireSocialLinks && !candidate.socialLinks?.length) {
+      return 'رابط تواصل مفقود';
+    }
 
-    if (s.requireRenouncedAuthorities && (candidate.mintAuthority || candidate.freezeAuthority))
+    if (s.requireRenouncedAuthorities && (candidate.mintAuthority || candidate.freezeAuthority)) {
       return 'Mint/Freeze Authority غير معطلة';
-
-    // ── فلتر المنحنى — مع حماية كاملة ──
-    const hasRealCurveData =
-      candidate.bondingCurveProgressSource !== 'unavailable' &&
-      candidate.bondingCurveProgressSource !== 'fallback-zero';
-
-    if (hasRealCurveData) {
-      const minCurve = Number(s.minCurveProgress ?? 1);
-      const maxCurve = Number(s.maxCurveProgress ?? 60);
-      const curveRounded = Math.round(candidate.bondingCurveProgress * 10) / 10;
-      if (curveRounded < minCurve) {
-        return `Bonding Curve ${curveRounded.toFixed(1)}% أقل من ${minCurve}%`;
-      }
-      if (curveRounded > maxCurve) {
-        return `Bonding Curve ${curveRounded.toFixed(1)}% أعلى من ${maxCurve}%`;
-      }
-    }
-    // إن لم تتوفر بيانات → تمرير العملة لباقي الفلاتر
-
-    const minLiq = Number(s.minLiquiditySol ?? 0);
-    if (minLiq > 0 && candidate.liquiditySol > 0 && candidate.liquiditySol < minLiq) {
-      return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
     }
 
-    const minMcap = Number(s.minMarketCapUsd ?? 0);
-    const maxMcap = Number(s.maxMarketCapUsd ?? 80000);
-    if (candidate.marketCapUsd > 0) {
-      if (minMcap > 0 && candidate.marketCapUsd < minMcap)
-        return `MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
-      if (maxMcap > 0 && candidate.marketCapUsd > maxMcap)
-        return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
+    if (s.maxCurveProgress > 0 || s.minCurveProgress > 0) {
+      const hasRealCurveData = candidate.bondingCurveProgressSource !== 'unavailable' &&
+                                candidate.bondingCurveProgressSource !== 'fallback-zero';
+      if (hasRealCurveData) {
+        const minCurve = Number(s.minCurveProgress ?? 0);
+        const maxCurve = Number(s.maxCurveProgress ?? 0);
+        const rounded = Math.round(candidate.bondingCurveProgress * 10) / 10;
+        if (minCurve > 0 && rounded < minCurve) {
+          return `Bonding Curve ${rounded.toFixed(1)}% أقل من ${minCurve}%`;
+        }
+        if (maxCurve > 0 && rounded > maxCurve) {
+          return `Bonding Curve ${rounded.toFixed(1)}% أعلى من ${maxCurve}%`;
+        }
+      }
     }
 
     const minVol = Number(s.minVolumeUsd ?? 0);
@@ -321,26 +294,52 @@ class PumpFunWatcher {
       return `حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
     }
 
-    const minBuyers = Number(s.minUniqueBuyers ?? 8);
-    if (candidate.uniqueBuyers < minBuyers)
+    const minBuyers = Number(s.minUniqueBuyers ?? 0);
+    if (minBuyers > 0 && candidate.uniqueBuyers > 0 && candidate.uniqueBuyers < minBuyers) {
       return `مشترون ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
+    }
 
-    if (s.requireBuyVolumeDominance) {
-      const buy = candidate.buyVolumeUsd;
-      const sell = candidate.sellVolumeUsd;
-      if (buy > 0 && sell > 0) {
-        const ratio = buy / sell;
-        const minRatio = Number(s.minBuySellRatio ?? 1.5);
-        if (ratio < minRatio)
-          return `نسبة شراء/بيع ${ratio.toFixed(2)} أقل من ${minRatio}`;
+    const maxDev = Number(s.maxCreatorHoldingsPct ?? 0);
+    if (candidate.heliusVerified && maxDev > 0 && candidate.creatorHoldingsPct > maxDev) {
+      return `حيازة المنشئ ${candidate.creatorHoldingsPct}% تتجاوز ${maxDev}%`;
+    }
+
+    const maxTop = Number(s.maxTopHoldersPct ?? 0);
+    if (candidate.heliusVerified && maxTop > 0 && candidate.topHoldersPct > maxTop) {
+      return `حيازة كبار الملاك ${candidate.topHoldersPct}% تتجاوز ${maxTop}%`;
+    }
+
+    if (s.requireBuyVolumeDominance && candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0) {
+      if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) {
+        return 'حجم الشراء ليس أكبر من البيع';
       }
     }
 
-    if (candidate.heliusVerified && !(candidate.creatorHoldingsPct <= Number(s.maxCreatorHoldingsPct ?? 25)))
-      return `حيازة المنشئ تتجاوز ${s.maxCreatorHoldingsPct}%`;
+    const minLiq = Number(s.minLiquiditySol ?? 0);
+    if (minLiq > 0 && candidate.liquiditySol > 0 && candidate.liquiditySol < minLiq) {
+      return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
+    }
 
-    if (candidate.heliusVerified && !(candidate.topHoldersPct <= Number(s.maxTopHoldersPct ?? 30)))
-      return `حيازة أكبر 10 محافظ تتجاوز ${s.maxTopHoldersPct}%`;
+    const minMcap = Number(s.minMarketCapUsd ?? 0);
+    const maxMcap = Number(s.maxMarketCapUsd ?? 0);
+    if (candidate.marketCapUsd > 0) {
+      if (minMcap > 0 && candidate.marketCapUsd < minMcap) {
+        return `MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
+      }
+      if (maxMcap > 0 && candidate.marketCapUsd > maxMcap) {
+        return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
+      }
+    }
+
+    const ageSec = candidate.createdAt
+      ? (Date.now() / 1000) - Number(candidate.createdAt)
+      : 0;
+    const minAge = Number(s.minTokenAgeSec ?? 0);
+    const maxAge = Number(s.maxTokenAgeSec ?? 0);
+    if (ageSec > 0) {
+      if (minAge > 0 && ageSec < minAge) return `عمر ${ageSec.toFixed(0)}ث أقل من ${minAge}ث`;
+      if (maxAge > 0 && ageSec > maxAge) return `عمر ${ageSec.toFixed(0)}ث أكبر من ${maxAge}ث`;
+    }
 
     return null;
   }

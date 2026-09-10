@@ -4,7 +4,7 @@ const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, SO
 const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
 const { openPosition, refreshPositions, closePosition, getPositions } = require('../services/paper');
-const { getUser, saveUser } = require('../services/storage');
+const { getUser, saveUser, resetSettings } = require('../services/storage');
 const { startHealthServer } = require('../health-server');
 
 startHealthServer();
@@ -65,6 +65,13 @@ function settingsText(s) { return `الإعدادات الديناميكية\nم
 bot.command('settings', async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.');
   const [, key, value] = ctx.message.text.trim().split(/\s+/);
+  if (key === 'reset') {
+    resetSettings(config.adminId, config.encryptionKey);
+    const reset = settingsForAdmin();
+    watcher.updateSettings(reset);
+    if (reset.autoSniperEnabled) watcher.start(); else watcher.stop();
+    return ctx.reply('✅ تم مسح كل الإعدادات القديمة. الفلاتر الآن كلها معطلة.');
+  }
   const s = settingsForAdmin();
   if (key) {
     const bool = value === 'on' ? true : value === 'off' ? false : null;

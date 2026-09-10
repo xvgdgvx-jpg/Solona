@@ -1,9 +1,12 @@
 const { getUser, saveUser } = require('./storage');
 
 const defaults = {
-  autoSniperEnabled: false,
+  // ── حالة التشغيل ──
+  autoSniperEnabled: true,
   paperTradingEnabled: true,
   autoSellEnabled: true,
+
+  // ── رأس المال ──
   paperCapitalSol: 1,
   paperAvailableSol: 1,
   paperAllocationPct: 5,
@@ -13,32 +16,40 @@ const defaults = {
   paperEvents: [],
   paperPnlSol: 0,
   paperTakeProfitPct: 50,
+  paperStopLossPct: 15,
+  paperTakeProfitFirstPct: 30,
+  paperTakeProfitFinalPct: 60,
+
+  // ── التداول الحقيقي ──
   liveTrading: false,
   tradeSizeSol: 0.1,
   maxTradesPerDay: 0,
   tradesToday: 0,
   tradeDay: new Date().toISOString().slice(0, 10),
-  minTokenAgeSec: 30,
-  maxTokenAgeSec: 0,
-  minLiquiditySol: 0,
-  minMarketCapUsd: 0,
-  maxMarketCapUsd: 80000,
-  requireRenouncedAuthorities: true,
-  requireBuyVolumeDominance: true,
-  minBuySellRatio: 1.5,
-  minCurveProgress: 0.5,
-  maxCurveProgress: 25,
-  minVolumeUsd: 300,
-  minUniqueBuyers: 8,
-  maxCreatorHoldingsPct: 10,
-  maxTopHoldersPct: 25,
+
+  // ── الفلاتر (كلها معطلة افتراضياً — المستخدم يختار) ──
+  minCurveProgress: 0,
+  maxCurveProgress: 0,
+  minVolumeUsd: 0,
+  minUniqueBuyers: 0,
+  maxCreatorHoldingsPct: 0,
+  maxTopHoldersPct: 0,
   requireSocialLinks: false,
-  watchlistMinutes: 15,
+  requireRenouncedAuthorities: false,
+  requireBuyVolumeDominance: false,
+  minLiquiditySol: 0,
+  maxMarketCapUsd: 0,
+  minMarketCapUsd: 0,
+  minTokenAgeSec: 0,
+  maxTokenAgeSec: 0,
+  watchlistMinutes: 10,
+
+  // ── الحالة ──
   lastMint: null,
   lastFilterResult: 'لم يبدأ الفحص بعد',
   rejectStats: {},
   checkedCount: 0,
-  lastCheckAt: null
+  lastCheckAt: null,
 };
 
 function getSettings(adminId, key) {
@@ -48,11 +59,14 @@ function getSettings(adminId, key) {
   if (settings.tradeDay !== today) { settings.tradeDay = today; settings.tradesToday = 0; }
   return settings;
 }
+
 function saveSettings(adminId, settings, key) {
   const user = getUser(adminId, key);
   saveUser(adminId, { ...user, settings: { ...defaults, ...settings } }, key);
 }
+
 function canTrade(settings) {
   return settings.maxTradesPerDay <= 0 || settings.tradesToday < settings.maxTradesPerDay;
 }
+
 module.exports = { defaults, getSettings, saveSettings, canTrade };
