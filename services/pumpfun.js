@@ -10,10 +10,11 @@ class PumpFunWatcher {
     this.adminId = adminId; this.settings = settings; this.onCandidate = onCandidate; this.onError = onError; this.onFilter = onFilter || (() => {});
     this.running = false; this.seen = new Set(); this.watchlist = new Map(); this.watchTimer = null; this.lastPollAt = null; this.lastCandidate = null; this.lastError = null;
     this.source = process.env.PUMPFUN_API_URL || DEFAULT_URLS[0];
-    this.helius = new HeliusService({ apiKey: process.env.HELIUS_API_KEY, rpcUrl: process.env.HELIUS_RPC_URL, wsUrl: process.env.HELIUS_WS_URL, onMint: (event) => this.handleHeliusMint(event), onError });
+    this.helius = new HeliusService({ apiKey: process.env.HELIUS_API_KEY, rpcUrl: process.env.HELIUS_RPC_URL, wsUrl: process.env.HELIUS_WS_URL, onMint: (event) => this.handleHeliusMint(event), onError: (error) => this.handleHeliusError(error) });
     this.streamMode = false;
   }
   updateSettings(settings) { this.settings = settings; }
+  handleHeliusError(error) { this.lastError = `Helius: ${error.message}`; this.onError(error); if (this.running && this.streamMode) { this.streamMode = false; this.helius.stop(); this.loop(); } }
   start() { if (this.running) return; this.running = true; this.streamMode = this.helius.start(); this.watchTimer = setInterval(() => this.recheckWatchlist(), 15000); if (!this.streamMode) this.loop(); else console.log('Helius Pump.fun WebSocket stream started'); }
   stop() { this.running = false; this.helius.stop(); if (this.watchTimer) clearInterval(this.watchTimer); this.watchTimer = null; this.watchlist.clear(); }
   status() { return { running: this.running, streamMode: this.streamMode, lastPollAt: this.lastPollAt, lastCandidate: this.lastCandidate, lastError: this.lastError, source: this.streamMode ? 'Helius WebSocket + DAS' : this.source }; }

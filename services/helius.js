@@ -20,8 +20,7 @@ class HeliusService {
   start() {
     if (!this.enabled() || !this.stopped) return false;
     this.stopped = false;
-    this.connect();
-    return true;
+    try { this.connect(); return true; } catch (error) { this.stopped = true; this.onError(error); return false; }
   }
 
   stop() {
@@ -33,7 +32,7 @@ class HeliusService {
 
   connect() {
     if (this.stopped) return;
-    this.ws = new WebSocket(this.wsUrl);
+    try { this.ws = new WebSocket(this.wsUrl); } catch (error) { this.onError(error); this.stopped = true; return; }
     this.ws.on('open', () => {
       this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'transactionSubscribe', params: [{ failed: false, accountInclude: [PUMP_PROGRAM_ID] }, { commitment: 'confirmed', encoding: 'jsonParsed', transactionDetails: 'full', maxSupportedTransactionVersion: 1 }] }));
       this.wsPing = setInterval(() => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.ping(); }, 10000);
