@@ -3,6 +3,7 @@ const { getUser, saveUser } = require('./storage');
 const defaults = {
   autoSniperEnabled: false,
   paperTradingEnabled: true,
+  autoSellEnabled: true,
   paperCapitalSol: 1,
   paperAllocationPct: 10,
   paperSizingMode: 'isolated',
