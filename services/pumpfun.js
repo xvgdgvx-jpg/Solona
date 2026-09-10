@@ -302,9 +302,10 @@ class PumpFunWatcher {
     }
     // إن لم تتوفر بيانات → تمرير العملة لباقي الفلاتر
 
-    const minLiq = Number(s.minLiquiditySol ?? 1.5);
-    if (candidate.liquiditySol < minLiq)
+    const minLiq = Number(s.minLiquiditySol ?? 0);
+    if (minLiq > 0 && candidate.liquiditySol > 0 && candidate.liquiditySol < minLiq) {
       return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
+    }
 
     const minMcap = Number(s.minMarketCapUsd ?? 0);
     const maxMcap = Number(s.maxMarketCapUsd ?? 80000);
@@ -315,9 +316,10 @@ class PumpFunWatcher {
         return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
     }
 
-    const minVol = Number(s.minVolumeUsd ?? 300);
-    if (candidate.volumeUsd < minVol)
+    const minVol = Number(s.minVolumeUsd ?? 0);
+    if (minVol > 0 && candidate.volumeUsd > 0 && candidate.volumeUsd < minVol) {
       return `حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
+    }
 
     const minBuyers = Number(s.minUniqueBuyers ?? 8);
     if (candidate.uniqueBuyers < minBuyers)

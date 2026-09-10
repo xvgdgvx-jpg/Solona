@@ -20,7 +20,7 @@ const defaults = {
   tradeDay: new Date().toISOString().slice(0, 10),
   minTokenAgeSec: 30,
   maxTokenAgeSec: 0,
-  minLiquiditySol: 1.5,
+  minLiquiditySol: 0,
   minMarketCapUsd: 0,
   maxMarketCapUsd: 80000,
   requireRenouncedAuthorities: true,
