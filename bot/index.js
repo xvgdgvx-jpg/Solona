@@ -199,8 +199,10 @@ setInterval(() => {
 }, 60000);
 let monitorErrorsCount = 0;
 let monitorBackoffOnce = false;
+let monitorQueued = false;
 async function monitorPaperPositions() {
-  if (paperMonitorBusy) return;
+  const startTime = Date.now();
+  if (paperMonitorBusy) { monitorQueued = true; return; }
   const s = settingsForAdmin();
   if (effectiveLiveTrading(s) || !s.autoSellEnabled) return;
   if (monitorBackoffOnce) { monitorBackoffOnce = false; return; }
@@ -208,23 +210,37 @@ async function monitorPaperPositions() {
   try {
     const { values } = await refreshPositionsCached({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
     monitorErrorsCount = 0;
-    for (const value of values) {
-      const positionAfterRefresh = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
-      if (!positionAfterRefresh || positionAfterRefresh.status !== 'open') continue;
-      if (value.pricingError) continue;
-      const takeProfitPct = Number(s.paperTakeProfitPct);
-      const stopLossPct = Number(s.paperStopLossPct);
-      const takeProfitHit = Number.isFinite(takeProfitPct) && takeProfitPct > 0 && value.pnlPct >= takeProfitPct;
-      const stopLossHit = Number.isFinite(stopLossPct) && stopLossPct > 0 && value.pnlPct <= -stopLossPct;
-      if (!takeProfitHit && !stopLossHit) continue;
-      const reason = stopLossHit
-        ? `وقف خسارة -${stopLossPct}% — إغلاق المركز بالكامل`
-        : `جني ربح +${takeProfitPct}% — إغلاق المركز بالكامل`;
-      const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction: 1, jupiterUrl: config.jupiterUrl });
-      await recordPaperSale(value, sold, reason);
-      const positionAfter = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
-      if (!positionAfter || positionAfter.status !== 'open') continue;
-    }
+    await Promise.all(values.map(async (value) => {
+      if (value.pricingError) return;
+      const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
+      if (!position || position.status !== 'open') return;
+      const stopLoss = Number(s.paperStopLossPct || 15);
+      const firstTarget = Number(s.paperTakeProfitFirstPct || 30);
+      const finalTarget = Number(s.paperTakeProfitFinalPct || 60);
+      const highestPnlPct = position.highestPnlPct == null ? value.pnlPct : Number(position.highestPnlPct);
+      let fraction = 0;
+      let reason = '';
+      if (value.pnlPct <= -stopLoss) {
+        fraction = 1;
+        reason = `وقف خسارة -${stopLoss}% — إغلاق المركز بالكامل`;
+      } else if (value.pnlPct <= highestPnlPct - 15) {
+        fraction = 1;
+        reason = `Trailing Stop — تراجع من أعلى ربح ${highestPnlPct.toFixed(1)}% إلى ${value.pnlPct.toFixed(1)}%`;
+      } else if (value.pnlPct >= finalTarget) {
+        fraction = 1;
+        reason = `جني الربح النهائي +${finalTarget}% — إغلاق المركز بالكامل`;
+      } else if (value.pnlPct >= firstTarget && !position.tp1Sold) {
+        fraction = 0.5;
+        reason = `جني الربح الأول +${firstTarget}% — بيع 50٪`;
+      }
+      if (!fraction) return;
+      const positionBeforeClose = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
+      if (!positionBeforeClose || positionBeforeClose.status !== 'open') return;
+      try {
+        const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction, jupiterUrl: config.jupiterUrl });
+        if (sold) await recordPaperSale(value, sold, reason);
+      } catch (error) { console.error(`Close error ${value.id}: ${error.message}`); }
+    }));
   } catch (error) {
     monitorErrorsCount += 1;
     console.error(`Paper position monitor error: ${error.message}`);
@@ -232,7 +248,12 @@ async function monitorPaperPositions() {
       console.log('[monitor] 5 أخطاء متتالية — تباطؤ مؤقت إلى 1 ثانية');
       monitorBackoffOnce = true;
     }
-  } finally { paperMonitorBusy = false; }
+  } finally {
+    paperMonitorBusy = false;
+    if (monitorQueued) { monitorQueued = false; setImmediate(monitorPaperPositions); }
+    const cycleMs = Date.now() - startTime;
+    if (cycleMs > 500) console.warn(`[monitor] دورة بطيئة: ${cycleMs}ms`);
+  }
 }
 setInterval(monitorPaperPositions, 100);
 function startWatcher() { console.log('Pump.fun watcher is manual-only; press the start button to enable it.'); return false; }

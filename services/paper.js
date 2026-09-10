@@ -5,7 +5,7 @@ const { getUser, saveUser } = require('./storage');
 const getPositions = (adminId, key) => getUser(adminId, key).paperPositions || [];
 const savePositions = (adminId, positions, key) => { const user = getUser(adminId, key); saveUser(adminId, { ...user, paperPositions: positions }, key); };
 let priceCache = { data: null, timestamp: 0 };
-const PRICE_CACHE_MS = 500;
+const PRICE_CACHE_MS = 50;
 
 async function solUsd() {
   try { const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 }); return Number(data.solana.usd); } catch { return null; }
@@ -16,7 +16,7 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
   const existing = positions.find((p) => p.mint === mint && p.status === 'open');
   if (existing) { existing.investedSol += investedSol; existing.tokenAmountRaw += outAmount; existing.tokenAmount = existing.tokenAmountRaw / (10 ** existing.decimals); existing.entryPriceSol = existing.investedSol / existing.tokenAmount; existing.updatedAt = Date.now(); }
-  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, tokenAmount: outAmount / (10 ** Number(metadata.decimals ?? 6)), decimals: Number(metadata.decimals ?? 6), entryPriceSol: investedSol / (outAmount / (10 ** Number(metadata.decimals ?? 6))), tp1Sold: false, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
+  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, tokenAmount: outAmount / (10 ** Number(metadata.decimals ?? 6)), decimals: Number(metadata.decimals ?? 6), entryPriceSol: investedSol / (outAmount / (10 ** Number(metadata.decimals ?? 6))), tp1Sold: false, highestPnlPct: null, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
   savePositions(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }
@@ -32,6 +32,17 @@ async function valuePosition({ jupiterUrl, position }) {
 async function refreshPositions({ adminId, key, jupiterUrl }) {
   const positions = getPositions(adminId, key).filter((p) => p.status === 'open');
   const values = await Promise.all(positions.map((position) => valuePosition({ jupiterUrl, position })));
+  let highestChanged = false;
+  for (const value of values) {
+    if (!Number.isFinite(value.pnlPct)) continue;
+    const position = positions.find((p) => p.id === value.id);
+    if (position && value.pnlPct > Number(position.highestPnlPct ?? -Infinity)) {
+      position.highestPnlPct = value.pnlPct;
+      position.updatedAt = Date.now();
+      highestChanged = true;
+    }
+  }
+  if (highestChanged) savePositions(adminId, positions, key);
   const usd = await solUsd();
   return { values, solUsd: usd };
 }
@@ -45,8 +56,8 @@ async function refreshPositionsCached(params) {
 async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUrl }) {
   const positions = getPositions(adminId, key);
   const position = positions.find((p) => p.id === positionId && p.status === 'open');
-  if (!position) throw new Error('المركز الافتراضي غير موجود أو مغلق.');
-  if (position.status !== 'open') throw new Error('المركز مغلق مسبقاً');
+  if (!position) return null;
+  if (position.status !== 'open') return null;
   position.status = 'closing';
   position.updatedAt = Date.now();
   savePositions(adminId, positions, key);
@@ -58,7 +69,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
     throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
   }
   if (fraction >= 1) position.status = 'closed';
-  else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; position.status = 'open'; }
+  else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; position.tp1Sold = true; position.status = 'open'; }
   position.updatedAt = Date.now();
   savePositions(adminId, positions, key);
   return { ...value, fraction };
