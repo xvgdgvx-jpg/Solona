@@ -268,11 +268,12 @@ class PumpFunWatcher {
     if (hasRealCurveData) {
       const minCurve = Number(s.minCurveProgress ?? 1);
       const maxCurve = Number(s.maxCurveProgress ?? 60);
-      if (candidate.bondingCurveProgress < minCurve) {
-        return `Bonding Curve ${candidate.bondingCurveProgress.toFixed(1)}% أقل من ${minCurve}%`;
+      const curveRounded = Math.round(candidate.bondingCurveProgress * 10) / 10;
+      if (curveRounded < minCurve) {
+        return `Bonding Curve ${curveRounded.toFixed(1)}% أقل من ${minCurve}%`;
       }
-      if (candidate.bondingCurveProgress > maxCurve) {
-        return `Bonding Curve ${candidate.bondingCurveProgress.toFixed(1)}% أعلى من ${maxCurve}%`;
+      if (curveRounded > maxCurve) {
+        return `Bonding Curve ${curveRounded.toFixed(1)}% أعلى من ${maxCurve}%`;
       }
     }
     // إن لم تتوفر بيانات → تمرير العملة لباقي الفلاتر
@@ -283,11 +284,13 @@ class PumpFunWatcher {
     if (s.maxMarketCapUsd && candidate.marketCapUsd > 0 && candidate.marketCapUsd > Number(s.maxMarketCapUsd))
       return 'Market Cap تجاوز السقف';
 
-    if (!(candidate.volumeUsd >= Number(s.minVolumeUsd ?? 500)))
-      return `حجم التداول أقل من ${s.minVolumeUsd} USD`;
+    const minVol = Number(s.minVolumeUsd ?? 0);
+    if (minVol > 0 && candidate.volumeUsd < minVol)
+      return `حجم التداول ${candidate.volumeUsd.toFixed(0)}$ أقل من ${minVol}$`;
 
-    if (!(candidate.uniqueBuyers >= Number(s.minUniqueBuyers ?? 5)))
-      return `عدد المشترين الفريدين أقل من ${s.minUniqueBuyers}`;
+    const minBuyers = Number(s.minUniqueBuyers ?? 0);
+    if (minBuyers > 0 && candidate.uniqueBuyers < minBuyers)
+      return `عدد المشترين ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
 
     if (s.requireBuyVolumeDominance && candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0
         && candidate.buyVolumeUsd <= candidate.sellVolumeUsd)
