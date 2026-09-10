@@ -58,11 +58,15 @@ class PumpFunWatcher {
     if (candidate.bondingCurveProgress < Number(s.minCurveProgress ?? 10) || candidate.bondingCurveProgress > Number(s.maxCurveProgress ?? 35)) return `Bonding Curve خارج ${s.minCurveProgress}-${s.maxCurveProgress}%`;
     if (candidate.liquiditySol < (s.minLiquiditySol || 5)) return 'السيولة أقل من الحد';
     if (candidate.marketCapUsd <= 0 || candidate.marketCapUsd > (s.maxMarketCapUsd || 100000)) return 'Market Cap خارج الحدود';
-    if (candidate.volumeUsd < Number(s.minVolumeUsd ?? 2500)) return `حجم التداول أقل من ${s.minVolumeUsd} USD`;
-    if (candidate.uniqueBuyers < Number(s.minUniqueBuyers ?? 15)) return `عدد المشترين الفريدين أقل من ${s.minUniqueBuyers}`;
+    const minVolumeUsd = Number(s.minVolumeUsd ?? 2500);
+    const minUniqueBuyers = Number(s.minUniqueBuyers ?? 15);
+    const maxCreatorHoldingsPct = Number(s.maxCreatorHoldingsPct ?? 5);
+    const maxTopHoldersPct = Number(s.maxTopHoldersPct ?? 25);
+    if (!(candidate.volumeUsd >= minVolumeUsd)) return `حجم التداول أقل من ${minVolumeUsd} USD`;
+    if (!(candidate.uniqueBuyers >= minUniqueBuyers)) return `عدد المشترين الفريدين أقل من ${minUniqueBuyers}`;
     if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) return 'حجم الشراء ليس أكبر من البيع';
-    if (candidate.heliusVerified && candidate.creatorHoldingsPct > Number(s.maxCreatorHoldingsPct ?? 5)) return `حيازة المنشئ تتجاوز ${s.maxCreatorHoldingsPct}%`;
-    if (candidate.heliusVerified && candidate.topHoldersPct > Number(s.maxTopHoldersPct ?? 25)) return `حيازة أكبر 10 محافظ تتجاوز ${s.maxTopHoldersPct}%`;
+    if (candidate.heliusVerified && !(candidate.creatorHoldingsPct <= maxCreatorHoldingsPct)) return `حيازة المنشئ تتجاوز ${maxCreatorHoldingsPct}%`;
+    if (candidate.heliusVerified && !(candidate.topHoldersPct <= maxTopHoldersPct)) return `حيازة أكبر 10 محافظ تتجاوز ${maxTopHoldersPct}%`;
     return null;
   }
   async evaluate(candidate) {
