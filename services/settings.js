@@ -3,6 +3,13 @@ const { getUser, saveUser } = require('./storage');
 const defaults = {
   autoSniperEnabled: false,
   paperTradingEnabled: true,
+  paperCapitalSol: 1,
+  paperAllocationPct: 10,
+  paperSizingMode: 'isolated',
+  paperPanelChatId: null,
+  paperPanelMessageId: null,
+  paperEvents: [],
+  paperPnlSol: 0,
   paperTakeProfitPct: 50,
   liveTrading: false,
   tradeSizeSol: 0.1,
