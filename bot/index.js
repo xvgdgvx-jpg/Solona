@@ -102,6 +102,7 @@ bot.callbackQuery(/^(buy|sell):([^:]+):(.+)$/, async (ctx) => { await ctx.answer
 bot.callbackQuery(/^pnl:(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); await sendPnl(ctx); });
 bot.callbackQuery(/^paper-sell:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const match = ctx.callbackQuery.data.match(/^paper-sell:(.+):(0\.5|1)$/); const id = match[1]; const fraction = match[2]; try { const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: id, fraction: Number(fraction), jupiterUrl: config.jupiterUrl }); await ctx.reply(`تمت محاكاة البيع بنسبة ${Number(fraction) * 100}٪\nالقيمة: ${result.currentSol.toFixed(6)} SOL\nPnL: ${result.pnlSol >= 0 ? '+' : ''}${result.pnlSol.toFixed(6)} SOL (${result.pnlPct.toFixed(2)}٪)`); } catch (error) { await ctx.reply(`تعذر محاكاة البيع.\n${error.message}`); } });
 
+let lastSniperErrorAt = 0;
 const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   if (!s.autoSniperEnabled) return;
@@ -117,7 +118,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
     const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
     await bot.api.sendMessage(config.adminId, `قنص آلي من Pump.fun\n${candidate.name} (${candidate.symbol})\nالعنوان: ${candidate.mint}\nحجم الصفقة: ${s.tradeSizeSol} SOL\n${status}`, { reply_markup: tradeMenu(candidate.mint) });
-  } catch (error) { await bot.api.sendMessage(config.adminId, `فشل القنص الآلي لهذه العملة:\n${error.message}`); }
+  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) { lastSniperErrorAt = now; await bot.api.sendMessage(config.adminId, `تعذر الحصول على سعر القنص الآلي حالياً.\n${error.message}\nسيتم إعادة المحاولة، ولن تتكرر رسالة الخطأ قبل 10 دقائق.`); } }
 }});
 function startWatcher() { if (settingsForAdmin().autoSniperEnabled) { console.log('Pump.fun watcher started; polling every 30 seconds'); watcher.start(); } }
 module.exports = bot;

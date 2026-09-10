@@ -34,6 +34,8 @@ if (mnemonic) {
 
 const encryptionKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
 if (encryptionKey.length !== 32) throw new Error('ENCRYPTION_KEY must be a 64-character hexadecimal AES-256 key');
+const configuredJupiterUrl = process.env.JUPITER_API_URL || '';
+const jupiterUrl = configuredJupiterUrl.includes('quote-api.jup.ag') ? 'https://api.jup.ag/swap/v1' : (configuredJupiterUrl || 'https://api.jup.ag/swap/v1');
 
 module.exports = {
   token: process.env.TELEGRAM_BOT_TOKEN,
@@ -43,7 +45,7 @@ module.exports = {
   walletSource,
   adminId: String(process.env.ADMIN_TELEGRAM_ID),
   liveTrading: String(process.env.LIVE_TRADING).toLowerCase() === 'true',
-  jupiterUrl: process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6',
+  jupiterUrl,
   port: Number(process.env.PORT || 3000),
   keepAliveUrl: process.env.KEEPALIVE_URL || `http://127.0.0.1:${process.env.PORT || 3000}/health`
 };
