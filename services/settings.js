@@ -2,6 +2,7 @@ const { getUser, saveUser } = require('./storage');
 
 const defaults = {
   autoSniperEnabled: false,
+  paperTradingEnabled: true,
   liveTrading: false,
   tradeSizeSol: 0.1,
   maxTradesPerDay: 0,

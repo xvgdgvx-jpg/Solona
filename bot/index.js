@@ -22,12 +22,12 @@ const effectiveLiveTrading = (settings) => Boolean(config.liveTrading && setting
 async function dashboard(ctx) { const s = settingsForAdmin(); await ctx.reply(`مُقتنص Solana\nالوضع: ${effectiveLiveTrading(s) ? 'تداول حقيقي' : 'Paper Trading — لا تُرسل معاملات'}\nالمراقب: ${s.autoSniperEnabled ? 'مفعّل' : 'متوقف'}\n\nالأوامر:\n/status — حالة المراقب\n/pnl — الأرباح والخسائر\n/portfolio — الأرصدة\n/wallet — عنوان المحفظة\n/settings — الإعدادات\n/snipe — شرح القنص\n/clean — تنظيف رسائل المحادثة الأخيرة`, { reply_markup: isAdmin(ctx) ? controlMenu(s.autoSniperEnabled) : undefined }); }
 bot.command(['start', 'menu'], dashboard);
 bot.command('clean', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.'); const chatId = ctx.chat.id; const current = ctx.msg.message_id; for (let id = current; id > Math.max(0, current - 100); id -= 1) { try { await ctx.api.deleteMessage(chatId, id); } catch (_) {} } });
-bot.command('status', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.'); const s = settingsForAdmin(); const status = watcher.status(); const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).toLocaleString('ar-IQ') : 'لم تبدأ بعد'; const candidate = status.lastCandidate ? `${status.lastCandidate.symbol} — ${status.lastCandidate.mint}` : 'لا توجد عملة مطابقة بعد'; await ctx.reply(`حالة المراقب\n\nالتشغيل: ${status.running ? 'يعمل الآن' : 'متوقف'}\nالمراقبة مفعّلة: ${s.autoSniperEnabled ? 'نعم' : 'لا'}\nمصدر البيانات: ${status.source}\nآخر فحص: ${lastPoll}\nآخر مرشح مطابق: ${candidate}\nآخر خطأ: ${status.lastError || 'لا يوجد'}\n\nالمراقب يفحص Pump.fun كل 30 ثانية.`); });
+bot.command('status', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.'); const s = settingsForAdmin(); const status = watcher.status(); const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).toLocaleString('ar-IQ') : 'لم تبدأ بعد'; const candidate = status.lastCandidate ? `${status.lastCandidate.symbol} — ${status.lastCandidate.mint}` : 'لا توجد عملة مطابقة بعد'; await ctx.reply(`حالة المراقب\n\nالتشغيل: ${status.running ? 'يعمل الآن' : 'متوقف'}\nالمراقبة مفعّلة: ${s.autoSniperEnabled ? 'نعم' : 'لا'}\nالقنص التجريبي: ${s.paperTradingEnabled ? 'مفعّل — شراء افتراضي وتحديث PnL عبر /pnl' : 'متوقف'}\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'معطّل'}\nمصدر البيانات: ${status.source}\nآخر فحص: ${lastPoll}\nآخر مرشح مطابق: ${candidate}\nآخر خطأ: ${status.lastError || 'لا يوجد'}\n\nالمراقب يعمل بصمت؛ استخدم /pnl لمراجعة المراكز.`); });
 bot.command('wallet', async (ctx) => { try { await ctx.reply(`عنوان المحفظة الرئيسية:\n${keypairFromSecret(userSecret()).publicKey.toBase58()}\n\nلا تشارك عبارة الاسترداد أو المفتاح الخاص.`); } catch (e) { await ctx.reply(`تعذر تهيئة المحفظة.\n${e.message}`); } });
 bot.command('portfolio', async (ctx) => { try { const p = await getPortfolio({ rpcUrl: config.rpcUrl, secret: userSecret() }); await ctx.reply(`المحفظة الاستثمارية\nالعنوان: ${p.address}\nرصيد SOL: ${p.sol.toFixed(4)}\nحسابات العملات غير الفارغة: ${p.tokens.length}`); } catch (e) { await ctx.reply(`تعذر تحميل المحفظة الاستثمارية.\n${e.message}`); } });
 bot.command('pnl', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('صلاحية المشرف مطلوبة.'); await sendPnl(ctx); });
 
-function settingsText(s) { return `الإعدادات الديناميكية\nمراقبة Pump.fun: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nالتداول الحقيقي الفعلي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'معطّل — Paper Trading'}\nالسماح من إعدادات البوت: ${s.liveTrading ? 'مفعّل' : 'معطّل'}\nحاجز البيئة LIVE_TRADING: ${config.liveTrading ? 'مفعّل' : 'معطّل'}\nحجم الصفقة: ${s.tradeSizeSol} SOL\nالحد الأقصى للصفقات اليومية: ${s.maxTradesPerDay || 'غير محدود'}\nالحد الأدنى للسيولة: ${s.minLiquiditySol || 'بدون حد'} SOL\nالحد الأقصى للقيمة السوقية: ${s.maxMarketCapUsd || 'بدون حد'} USD\nاشتراط تعطيل Mint/Freeze Authority: ${s.requireRenouncedAuthorities ? 'نعم' : 'لا'}\n\nأوامر التعديل:\n/settings live on|off\n/settings sniper on|off\n/settings size <SOL>\n/settings maxtrades <عدد أو 0>\n/settings minliq <SOL>\n/settings maxcap <USD>\n/settings authorities on|off`;
+function settingsText(s) { return `الإعدادات الديناميكية\nمراقبة Pump.fun: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nالقنص التجريبي: ${s.paperTradingEnabled ? 'مفعّل — شراء وبيع افتراضي' : 'متوقف'}\nالتداول الحقيقي الفعلي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'معطّل — لا تُرسل معاملات'}\nالسماح من إعدادات البوت: ${s.liveTrading ? 'مفعّل' : 'معطّل'}\nحاجز البيئة LIVE_TRADING: ${config.liveTrading ? 'مفعّل' : 'معطّل'}\nحجم الصفقة: ${s.tradeSizeSol} SOL\nالحد الأقصى للصفقات اليومية: ${s.maxTradesPerDay || 'غير محدود'}\nالحد الأدنى للسيولة: ${s.minLiquiditySol || 'بدون حد'} SOL\nالحد الأقصى للقيمة السوقية: ${s.maxMarketCapUsd || 'بدون حد'} USD\nاشتراط تعطيل Mint/Freeze Authority: ${s.requireRenouncedAuthorities ? 'نعم' : 'لا'}\n\nأوامر التعديل:\n/settings live on|off\n/settings sniper on|off\n/settings paper on|off\n/settings size <SOL>\n/settings maxtrades <عدد أو 0>\n/settings minliq <SOL>\n/settings maxcap <USD>\n/settings authorities on|off`;
 }
 bot.command('settings', async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.');
@@ -35,15 +35,16 @@ bot.command('settings', async (ctx) => {
   const s = settingsForAdmin();
   if (key) {
     const bool = value === 'on' ? true : value === 'off' ? false : null;
-    if (['live', 'sniper', 'authorities'].includes(key) && bool === null) return ctx.reply('استخدم on أو off.');
+    if (['live', 'sniper', 'paper', 'authorities'].includes(key) && bool === null) return ctx.reply('استخدم on أو off.');
     if (key === 'live') s.liveTrading = bool;
     else if (key === 'sniper') s.autoSniperEnabled = bool;
     else if (key === 'authorities') s.requireRenouncedAuthorities = bool;
+    else if (key === 'paper') s.paperTradingEnabled = bool;
     else if (key === 'size' && Number(value) > 0) s.tradeSizeSol = Number(value);
     else if (key === 'maxtrades' && Number(value) >= 0) s.maxTradesPerDay = Number(value);
     else if (key === 'minliq' && Number(value) >= 0) s.minLiquiditySol = Number(value);
     else if (key === 'maxcap' && Number(value) >= 0) s.maxMarketCapUsd = Number(value);
-    else if (!['live', 'sniper', 'authorities', 'size', 'maxtrades', 'minliq', 'maxcap'].includes(key)) return ctx.reply('إعداد غير معروف.');
+    else if (!['live', 'sniper', 'paper', 'authorities', 'size', 'maxtrades', 'minliq', 'maxcap'].includes(key)) return ctx.reply('إعداد غير معروف.');
     saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); if (s.autoSniperEnabled) watcher.start(); else watcher.stop();
   }
   await ctx.reply(settingsText(s));
@@ -110,19 +111,20 @@ let lastSniperErrorAt = 0;
 const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   if (!s.autoSniperEnabled) return;
-  if (!canTrade(s)) return bot.api.sendMessage(config.adminId, 'تم إيقاف القنص تلقائياً بسبب بلوغ حد الصفقات اليومية.');
+  if (!canTrade(s)) return;
+  if (!s.paperTradingEnabled && !effectiveLiveTrading(s)) return;
   try {
     const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(s.tradeSizeSol * 1e9), slippageBps: 100 });
     if (!effectiveLiveTrading(s)) {
       const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: s.tradeSizeSol, quote });
       s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
-      return bot.api.sendMessage(config.adminId, `قنص تجريبي ببيانات حقيقية من Pump.fun/Jupiter\n${candidate.name} (${candidate.symbol})\nالعنوان: ${candidate.mint}\nالمبلغ الافتراضي: ${s.tradeSizeSol} SOL\nلم تُرسل أي معاملة.`, { reply_markup: paperMenu(position.id) });
+      return;
     }
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s) });
     s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
     const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
-    await bot.api.sendMessage(config.adminId, `قنص آلي من Pump.fun\n${candidate.name} (${candidate.symbol})\nالعنوان: ${candidate.mint}\nحجم الصفقة: ${s.tradeSizeSol} SOL\n${status}`, { reply_markup: tradeMenu(candidate.mint) });
-  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) { lastSniperErrorAt = now; await bot.api.sendMessage(config.adminId, `لا يوجد سعر/Route متاح لهذه العملة حالياً أو أن Jupiter مشغول.\nسيعيد البوت المحاولة تلقائياً، ولن تتكرر رسالة التنبيه قبل 10 دقائق.`); } }
+    console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
+  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
 }});
 function startWatcher() { if (settingsForAdmin().autoSniperEnabled) { console.log('Pump.fun watcher started; polling every 30 seconds'); watcher.start(); } }
 module.exports = bot;
