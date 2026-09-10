@@ -5,6 +5,11 @@ const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
 const { openPosition, refreshPositions, closePosition, getPositions } = require('../services/paper');
 const { getUser, saveUser } = require('../services/storage');
+const { startHealthServer } = require('../health-server');
+
+startHealthServer();
+process.on('uncaughtException', (error) => console.error('[uncaughtException]', error.stack || error.message));
+process.on('unhandledRejection', (error) => console.error('[unhandledRejection]', error?.stack || error));
 
 const bot = new Bot(config.token);
 const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
@@ -174,6 +179,14 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
   } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
 }});
+setInterval(() => {
+  const s = settingsForAdmin();
+  if (!s.autoSniperEnabled) return;
+  const status = watcher.status();
+  if (!status.running) { console.log('[watchdog] Watcher stopped — restarting'); watcher.start(); return; }
+  const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).getTime() : Date.now();
+  if (!status.streamMode && Date.now() - lastPoll > 120000) { console.log('[watchdog] Watcher stalled > 2min — restarting'); watcher.stop(); setTimeout(() => watcher.start(), 2000); }
+}, 60000);
 async function monitorPaperPositions() {
   const s = settingsForAdmin();
   if (paperMonitorBusy || effectiveLiveTrading(s) || !s.autoSellEnabled) return;
