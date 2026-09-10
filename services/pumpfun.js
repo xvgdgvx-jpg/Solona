@@ -285,11 +285,11 @@ class PumpFunWatcher {
       return 'Market Cap تجاوز السقف';
 
     const minVol = Number(s.minVolumeUsd ?? 0);
-    if (minVol > 0 && candidate.volumeUsd < minVol)
+    if (minVol > 0 && candidate.volumeUsd > 0 && candidate.volumeUsd < minVol)
       return `حجم التداول ${candidate.volumeUsd.toFixed(0)}$ أقل من ${minVol}$`;
 
     const minBuyers = Number(s.minUniqueBuyers ?? 0);
-    if (minBuyers > 0 && candidate.uniqueBuyers < minBuyers)
+    if (minBuyers > 0 && candidate.uniqueBuyers > 0 && candidate.uniqueBuyers < minBuyers)
       return `عدد المشترين ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
 
     if (s.requireBuyVolumeDominance && candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0
