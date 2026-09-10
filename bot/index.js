@@ -22,11 +22,11 @@ const panelKeyboard = (s) => new InlineKeyboard().text(s.autoSniperEnabled ? 'إ
 const settingsKeyboard = () => new InlineKeyboard().text('حجم الصفقة', 'cfg:allocation').row().text('عدد الصفقات اليومية', 'cfg:daily').row().text('هدف الربح والبيع', 'cfg:profit').row().text('نمط حجم الصفقة', 'cfg:sizing').row().text('تأكيد البدء', 'cfg:confirm').text('رجوع', 'panel:back');
 const allocationKeyboard = () => new InlineKeyboard().text('10٪', 'set:allocation:10').text('25٪', 'set:allocation:25').text('50٪', 'set:allocation:50').row().text('75٪', 'set:allocation:75').text('100٪', 'set:allocation:100').row().text('رجوع', 'panel:settings');
 const dailyKeyboard = () => new InlineKeyboard().text('مفتوح', 'set:daily:0').text('5', 'set:daily:5').text('10', 'set:daily:10').text('50', 'set:daily:50').row().text('رجوع', 'cfg:allocation');
-const profitKeyboard = () => new InlineKeyboard().text('10٪', 'set:profit:10').text('25٪', 'set:profit:25').text('50٪', 'set:profit:50').row().text('75٪', 'set:profit:75').text('100٪', 'set:profit:100').row().text('رجوع', 'cfg:daily');
+const profitKeyboard = () => new InlineKeyboard().text('5٪', 'set:profit:5').text('10٪', 'set:profit:10').text('25٪', 'set:profit:25').row().text('50٪', 'set:profit:50').text('75٪', 'set:profit:75').text('100٪', 'set:profit:100').row().text('رجوع', 'cfg:daily');
 const sizingKeyboard = () => new InlineKeyboard().text('صفقة معزولة', 'set:sizing:isolated').row().text('شراء موسّع', 'set:sizing:expanded').row().text('رجوع', 'cfg:profit');
-function panelText(s) { const events = (s.paperEvents || []).slice(-5).reverse(); const eventText = events.length ? events.map((e) => `${e.type}: ${e.name || e.mint} — ${e.detail}`).join('\n') : 'لا توجد عمليات بعد'; return `لوحة القنص التجريبي\n\nالحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'}\nالشراء التجريبي: ${s.paperTradingEnabled ? 'مفعّل' : 'متوقف'}\nالبيع التلقائي عند الهدف: ${s.autoSellEnabled ? 'مفعّل' : 'متوقف'}\nالرصيد الافتراضي: ${Number(s.paperCapitalSol).toFixed(4)} SOL\nPnL المحقق: ${Number(s.paperPnlSol || 0).toFixed(4)} SOL\nهدف البيع: +${s.paperTakeProfitPct}%\nالحجم: ${s.paperAllocationPct}% — ${s.paperSizingMode === 'expanded' ? 'موسّع' : 'معزول'}\nالحد اليومي: ${s.maxTradesPerDay || 'مفتوح'}\n\nآخر العمليات:\n${eventText}\n\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'متوقف وآمن'}`; }
+function panelText(s) { const events = (s.paperEvents || []).slice(-5).reverse(); const eventText = events.length ? events.map((e) => `${e.type}: ${e.name || e.mint} — ${e.detail}`).join('\n') : 'لا توجد عمليات بعد'; return `لوحة القنص التجريبي\n\nالحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'}\nالشراء التجريبي: ${s.paperTradingEnabled ? 'مفعّل' : 'متوقف'}\nالبيع التلقائي عند الهدف: ${s.autoSellEnabled ? 'مفعّل' : 'متوقف'}\nرأس المال الأصلي: ${Number(s.paperCapitalSol).toFixed(4)} SOL\nالرصيد المتاح للشراء: ${Number(s.paperAvailableSol).toFixed(4)} SOL\nإجمالي الأرباح المحققة: ${Number(s.paperPnlSol || 0).toFixed(4)} SOL\nهدف البيع: +${s.paperTakeProfitPct}%\nالحجم: ${s.paperAllocationPct}% — ${s.paperSizingMode === 'expanded' ? 'موسّع' : 'معزول'}\nالحد اليومي: ${s.maxTradesPerDay || 'مفتوح'}\n\nآخر العمليات:\n${eventText}\n\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'متوقف وآمن'}`; }
 function detailsText(s) { const events = (s.paperEvents || []).slice().reverse(); return `تفاصيل عمليات Paper Trading\n\n${events.length ? events.map((e, i) => `${i + 1}. ${e.type}\n${e.name || 'بدون اسم'}\nالعنوان: ${e.mint}\n${e.detail}`).join('\n\n') : 'لا توجد عمليات مسجلة بعد.'}`; }
-const paperTradeAmount = (s) => Math.max(0.000001, (Number(s.paperCapitalSol) + (s.paperSizingMode === 'expanded' ? Number(s.paperPnlSol || 0) : 0)) * Number(s.paperAllocationPct || 10) / 100);
+const paperTradeAmount = (s) => Number(s.paperAvailableSol || 0) * Number(s.paperAllocationPct || 10) / 100;
 async function updatePanel(s = settingsForAdmin(), ctx = null) { const chatId = s.paperPanelChatId || config.adminId; const messageId = s.paperPanelMessageId; if (!messageId) return; try { await (ctx?.api || bot.api).editMessageText(chatId, messageId, panelText(s), { reply_markup: panelKeyboard(s) }); } catch (error) { console.error(`Panel update error: ${error.message}`); } }
 
 async function dashboard(ctx) { if (!isAdmin(ctx)) return ctx.reply('هذه اللوحة متاحة للمشرف فقط.'); const s = settingsForAdmin(); if (s.paperPanelMessageId) { await updatePanel(s, ctx); return; } const sent = await ctx.reply(panelText(s), { reply_markup: panelKeyboard(s) }); s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = sent.message_id; saveSettings(config.adminId, s, config.encryptionKey); }
@@ -133,10 +133,11 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   if (!effectiveLiveTrading(s) && getPositions(config.adminId, config.encryptionKey).some((position) => position.status === 'open')) return;
   try {
     const amountSol = paperTradeAmount(s);
+    if (!effectiveLiveTrading(s) && (amountSol <= 0 || Number(s.paperAvailableSol) < amountSol)) return;
     const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(amountSol * 1e9), slippageBps: 100 });
     if (!effectiveLiveTrading(s)) {
       const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote, metadata: candidate });
-      s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+      s.paperAvailableSol = Number(s.paperAvailableSol) - amountSol; s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
       s.paperEvents = [...(s.paperEvents || []), { type: 'شراء', name: `${candidate.name} (${candidate.symbol})`, mint: candidate.mint, detail: `${amountSol.toFixed(4)} SOL | ${quote.outAmount} Token | سيولة ${candidate.liquiditySol.toFixed(2)} SOL` }].slice(-10);
       saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
       return;
@@ -156,7 +157,7 @@ async function monitorPaperPositions() {
     for (const value of values) {
       if (value.pricingError || value.pnlPct < Number(s.paperTakeProfitPct || 50)) continue;
       const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction: 1, jupiterUrl: config.jupiterUrl });
-      s.paperPnlSol = Number(s.paperPnlSol || 0) + sold.pnlSol; s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${sold.currentSol.toFixed(4)} SOL | ربح ${sold.pnlSol.toFixed(4)} SOL (${sold.pnlPct.toFixed(1)}٪)` }].slice(-10); saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
+      s.paperAvailableSol = Number(s.paperAvailableSol) + sold.currentSol; s.paperPnlSol = Number(s.paperPnlSol || 0) + sold.pnlSol; s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${sold.currentSol.toFixed(4)} SOL | ربح ${sold.pnlSol.toFixed(4)} SOL (${sold.pnlPct.toFixed(1)}٪)` }].slice(-10); saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
     }
   } catch (error) { console.error(`Paper position monitor error: ${error.message}`); }
   finally { paperMonitorBusy = false; }

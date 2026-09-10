@@ -5,6 +5,7 @@ const defaults = {
   paperTradingEnabled: true,
   autoSellEnabled: true,
   paperCapitalSol: 1,
+  paperAvailableSol: 1,
   paperAllocationPct: 10,
   paperSizingMode: 'isolated',
   paperPanelChatId: null,
