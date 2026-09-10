@@ -23,8 +23,8 @@ const defaults = {
   tradeDay: new Date().toISOString().slice(0, 10),
   minLiquiditySol: 0,
   maxMarketCapUsd: 0,
-  requireRenouncedAuthorities: true,
-  requireBuyVolumeDominance: true,
+  requireRenouncedAuthorities: false,
+  requireBuyVolumeDominance: false,
   minCurveProgress: 10,
   maxCurveProgress: 35,
   minVolumeUsd: 2500,
@@ -34,7 +34,10 @@ const defaults = {
   requireSocialLinks: true,
   watchlistMinutes: 5,
   lastMint: null,
-  lastFilterResult: 'لم يبدأ الفحص بعد'
+  lastFilterResult: 'لم يبدأ الفحص بعد',
+  rejectStats: {},
+  checkedCount: 0,
+  lastCheckAt: null
 };
 
 function getSettings(adminId, key) {
