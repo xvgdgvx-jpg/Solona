@@ -27,12 +27,20 @@ const startBot = async () => {
   if (shuttingDown || botStarting || botReady) return;
   botStarting = true;
   try {
-    await bot.start();
+    const polling = bot.start();
     botReady = true;
     retryDelayMs = 5000;
     lastBotError = null;
     console.log('Telegram bot started');
     bot.startWatcher();
+    polling.catch((error) => {
+      if (shuttingDown) return;
+      botReady = false;
+      lastBotError = error.description || error.message;
+      console.error(`Telegram polling stopped; retrying in ${retryDelayMs / 1000}s: ${lastBotError}`);
+      retryTimer = setTimeout(startBot, retryDelayMs);
+      retryDelayMs = Math.min(retryDelayMs * 2, 60000);
+    });
   } catch (error) {
     botReady = false;
     lastBotError = error.description || error.message;
