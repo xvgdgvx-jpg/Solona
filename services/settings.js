@@ -24,6 +24,14 @@ const defaults = {
   minLiquiditySol: 5,
   maxMarketCapUsd: 100000,
   requireRenouncedAuthorities: true,
+  minCurveProgress: 10,
+  maxCurveProgress: 35,
+  minVolumeUsd: 2500,
+  minUniqueBuyers: 15,
+  maxCreatorHoldingsPct: 5,
+  maxTopHoldersPct: 25,
+  requireSocialLinks: true,
+  watchlistMinutes: 5,
   lastMint: null,
   lastFilterResult: 'لم يبدأ الفحص بعد'
 };
