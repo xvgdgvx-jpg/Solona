@@ -71,6 +71,16 @@ class PumpFunWatcher {
     this.watchlist.clear();
   }
 
+  resetCycle() {
+    this.seen.clear();
+    this.watchlist.clear();
+    this.lastPollAt = null;
+    this.lastCandidate = null;
+    this.lastError = null;
+    this.watchlistBusy = false;
+    console.log('[cycle] Pump.fun scan history and watchlist reset');
+  }
+
   status() {
     return {
       running: this.running,
