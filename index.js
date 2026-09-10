@@ -19,6 +19,7 @@ const startBot = async () => {
     await bot.start();
     botReady = true;
     console.log('Telegram bot started');
+    bot.startWatcher();
   } catch (error) {
     console.error(`Telegram startup failed; retrying in 30s: ${error.description || error.message}`);
     setTimeout(startBot, 30000).unref();

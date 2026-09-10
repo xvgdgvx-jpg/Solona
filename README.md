@@ -12,6 +12,12 @@ Use a Node web service with build command `npm install` and start command `npm s
 
 The service exposes `GET /health` and binds to `PORT` or 3000. The keep-alive request is best-effort and never crashes the process. Render sleep prevention is platform-dependent; self-pinging does not guarantee a free-tier instance remains awake.
 
+## Pump.fun auto-sniper
+
+The optional Pump.fun watcher polls recent launches every 30 seconds. It is disabled by default and can be enabled by the admin with `/settings sniper on`. It applies configurable mint-authority and freeze-authority checks, minimum liquidity, maximum market cap, trade size, daily trade limit, and live/dry-run mode. The admin can change these at runtime with `/settings live on|off`, `/settings size <SOL>`, `/settings maxtrades <عدد أو 0>`, `/settings minliq <SOL>`, `/settings maxcap <USD>`, and `/settings authorities on|off`. The source endpoint can be overridden with `PUMPFUN_API_URL`; use a reliable authenticated data provider if the public endpoint is unavailable or rate-limited.
+
+The watcher is a risk-control feature, not a guarantee of fills or profitability. Pump.fun bonding-curve price impact, fees, migration to PumpSwap, RPC delay, slippage, and malicious launches can cause losses. Keep dry-run mode enabled until the filters and alerts are independently verified.
+
 ## Commands
 
 `/start` and `/menu` open the single inline-keyboard dashboard. `/wallet` shows the configured wallet address. `/portfolio` reads SOL and non-zero token accounts. `/snipe` and `/settings` are admin-only. Admin trading uses `/buy <TOKEN_MINT> <SOL_AMOUNT>` and `/sell <TOKEN_MINT> <SOL_AMOUNT>`; the current implementation uses Jupiter exact-in quotes and a bounded 10 SOL request limit.

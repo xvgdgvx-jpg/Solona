@@ -58,6 +58,20 @@ async function getTokenAmount({ rpcUrl, ownerSecret, mint, uiAmount }) {
   }
 }
 
+async function getTokenBalance({ rpcUrl, ownerSecret, mint, fraction = 1 }) {
+  const wallet = keypairFromSecret(ownerSecret);
+  try {
+    const accounts = await connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) });
+    const account = accounts.value.find(({ account }) => Number(account.data.parsed.info.tokenAmount.uiAmount || 0) > 0);
+    if (!account) throw new Error('لا يوجد رصيد لهذه العملة.');
+    const info = account.account.data.parsed.info.tokenAmount;
+    return { raw: Math.floor(Number(info.amount) * fraction), decimals: info.decimals };
+  } catch (error) {
+    if (error.message === 'لا يوجد رصيد لهذه العملة.') throw error;
+    throw new Error(`تعذر قراءة رصيد العملة: ${error.message}`);
+  }
+}
+
 async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading }) {
   const wallet = keypairFromSecret(secret);
   if (!liveTrading) return { simulated: true, wallet: wallet.publicKey.toBase58(), message: 'الوضع التجريبي: لم تُرسل أي معاملة.' };
@@ -86,4 +100,4 @@ async function getPortfolio({ rpcUrl, secret }) {
   }
 }
 
-module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, executeSwap, getPortfolio };
+module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio };

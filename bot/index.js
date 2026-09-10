@@ -1,81 +1,86 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const config = require('../config');
-const { getQuote, getTokenAmount, executeSwap, getPortfolio, SOL_MINT, keypairFromSecret } = require('../services/solana');
+const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, SOL_MINT, keypairFromSecret } = require('../services/solana');
+const { getSettings, saveSettings, canTrade } = require('../services/settings');
+const { PumpFunWatcher } = require('../services/pumpfun');
 
 const bot = new Bot(config.token);
-const menu = () => new InlineKeyboard()
-  .text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row()
-  .text('اقتناص عملة', 'snipe').text('الإعدادات', 'settings');
+const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
+const tradeMenu = (mint) => new InlineKeyboard().text('شراء 0.1 SOL', `buy:${mint}:0.1`).text('شراء 0.5 SOL', `buy:${mint}:0.5`).row().text('بيع 50٪', `sell:${mint}:0.5`).text('بيع 100٪', `sell:${mint}:1`);
 const isAdmin = (ctx) => String(ctx.from?.id) === config.adminId;
 const userSecret = () => config.masterPrivateKey;
 const explorer = (sig) => `https://solscan.io/tx/${sig}`;
+const settingsForAdmin = () => getSettings(config.adminId, config.encryptionKey);
 
-async function dashboard(ctx) {
-  await ctx.reply(`مُقتنص عملات Solana\nوضع التشغيل: ${config.liveTrading ? 'تداول حقيقي — راجع إعدادات المخاطر' : 'تجريبي — لن تُرسل أي معاملات'}\nاختر إجراءً من القائمة:`, { reply_markup: menu() });
-}
+async function dashboard(ctx) { await ctx.reply(`مُقتنص عملات Solana\nالوضع: ${settingsForAdmin().liveTrading ? 'تداول حقيقي' : 'تجريبي — لا تُرسل معاملات'}\nالمراقب: ${settingsForAdmin().autoSniperEnabled ? 'مفعّل' : 'متوقف'}\nاختر إجراءً:`, { reply_markup: menu() }); }
 bot.command(['start', 'menu'], dashboard);
+bot.command('wallet', async (ctx) => { try { await ctx.reply(`عنوان المحفظة الرئيسية:\n${keypairFromSecret(userSecret()).publicKey.toBase58()}\n\nلا تشارك عبارة الاسترداد أو المفتاح الخاص.`); } catch (e) { await ctx.reply(`تعذر تهيئة المحفظة.\n${e.message}`); } });
+bot.command('portfolio', async (ctx) => { try { const p = await getPortfolio({ rpcUrl: config.rpcUrl, secret: userSecret() }); await ctx.reply(`المحفظة الاستثمارية\nالعنوان: ${p.address}\nرصيد SOL: ${p.sol.toFixed(4)}\nحسابات العملات غير الفارغة: ${p.tokens.length}`); } catch (e) { await ctx.reply(`تعذر تحميل المحفظة الاستثمارية.\n${e.message}`); } });
 
-bot.command('wallet', async (ctx) => {
-  try {
-    const address = keypairFromSecret(userSecret()).publicKey.toBase58();
-    await ctx.reply(`عنوان المحفظة الرئيسية:\n${address}\n\nلا ترسل مفاتيحك الخاصة إلى أي شخص.`);
-  } catch (error) {
-    await ctx.reply(`تعذر تهيئة المحفظة.\n${error.message}`);
-  }
-});
-
-bot.command('portfolio', async (ctx) => {
-  try {
-    const p = await getPortfolio({ rpcUrl: config.rpcUrl, secret: userSecret() });
-    await ctx.reply(`المحفظة الاستثمارية\nالعنوان: ${p.address}\nرصيد SOL: ${p.sol.toFixed(4)}\nعدد حسابات العملات غير الفارغة: ${p.tokens.length}`);
-  } catch (error) {
-    await ctx.reply(`تعذر تحميل المحفظة الاستثمارية.\n${error.message}`);
-  }
-});
-
+function settingsText(s) { return `الإعدادات الديناميكية\nمراقبة Pump.fun: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nالتداول الحقيقي: ${s.liveTrading ? 'مفعّل' : 'معطّل — تجريبي'}\nحجم الصفقة: ${s.tradeSizeSol} SOL\nالحد الأقصى للصفقات اليومية: ${s.maxTradesPerDay || 'غير محدود'}\nالحد الأدنى للسيولة: ${s.minLiquiditySol || 'بدون حد'} SOL\nالحد الأقصى للقيمة السوقية: ${s.maxMarketCapUsd || 'بدون حد'} USD\nاشتراط تعطيل Mint/Freeze Authority: ${s.requireRenouncedAuthorities ? 'نعم' : 'لا'}\n\nأوامر التعديل:\n/settings live on|off\n/settings sniper on|off\n/settings size <SOL>\n/settings maxtrades <عدد أو 0>\n/settings minliq <SOL>\n/settings maxcap <USD>\n/settings authorities on|off`;
+}
 bot.command('settings', async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.');
-  await ctx.reply(`الإعدادات الحالية\nالتداول الحقيقي: ${config.liveTrading ? 'مفعّل' : 'معطّل — الوضع التجريبي'}\nالانزلاق السعري: 100 نقطة أساس\nتُدار إعدادات التنفيذ من متغيرات بيئة الخادم.`);
+  const [, key, value] = ctx.message.text.trim().split(/\s+/);
+  const s = settingsForAdmin();
+  if (key) {
+    const bool = value === 'on' ? true : value === 'off' ? false : null;
+    if (['live', 'sniper', 'authorities'].includes(key) && bool === null) return ctx.reply('استخدم on أو off.');
+    if (key === 'live') s.liveTrading = bool;
+    else if (key === 'sniper') s.autoSniperEnabled = bool;
+    else if (key === 'authorities') s.requireRenouncedAuthorities = bool;
+    else if (key === 'size' && Number(value) > 0) s.tradeSizeSol = Number(value);
+    else if (key === 'maxtrades' && Number(value) >= 0) s.maxTradesPerDay = Number(value);
+    else if (key === 'minliq' && Number(value) >= 0) s.minLiquiditySol = Number(value);
+    else if (key === 'maxcap' && Number(value) >= 0) s.maxMarketCapUsd = Number(value);
+    else if (!['live', 'sniper', 'authorities', 'size', 'maxtrades', 'minliq', 'maxcap'].includes(key)) return ctx.reply('إعداد غير معروف.');
+    saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); if (s.autoSniperEnabled) watcher.start(); else watcher.stop();
+  }
+  await ctx.reply(settingsText(s), { reply_markup: new InlineKeyboard().text(s.autoSniperEnabled ? 'إيقاف المراقب' : 'تشغيل المراقب', 'toggle:sniper').text(s.liveTrading ? 'تعطيل الحقيقي' : 'تفعيل الحقيقي', 'toggle:live') });
 });
 
-bot.command('snipe', async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply('صلاحية المشرف مطلوبة للتحكم في التداول.');
-  await ctx.reply('لشراء عملة، أرسل:\n/buy <عنوان_العملة> <مقدار_SOL>\n\nمثال:\n/buy 9xQeWvG816bUx9EPf5sG4xJt8hNfL3pQzR2aB7cD6eF 0.1\n\nالحد الأقصى للطلب الواحد: 10 SOL.', { reply_markup: menu() });
-});
+bot.command('snipe', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('صلاحية المشرف مطلوبة.'); await ctx.reply('المراقبة للمشرف فقط وتستهدف Pump.fun. عدّل الفلاتر ثم استخدم /settings sniper on لتشغيلها.\nللشراء اليدوي: /buy <عنوان_العملة> <مقدار_SOL>'); });
 bot.command('buy', async (ctx) => trade(ctx, 'buy'));
 bot.command('sell', async (ctx) => trade(ctx, 'sell'));
 
-async function trade(ctx, side) {
+async function trade(ctx, side, mintArg, amountArg, fraction = null) {
   if (!isAdmin(ctx)) return ctx.reply('صلاحية المشرف مطلوبة لتنفيذ التداول.');
-  const [, mint, amountText] = ctx.message.text.trim().split(/\s+/);
-  const amount = Number(amountText);
-  const action = side === 'buy' ? 'شراء' : 'بيع';
-  if (!mint || !Number.isFinite(amount) || amount <= 0 || amount > 10) {
-    return ctx.reply(`صيغة الأمر غير صحيحة.\nاستخدم: /${side} <عنوان_العملة> <${side === 'buy' ? 'مقدار_SOL' : 'مقدار_العملة'}>\nالحد الأقصى: 10.`);
-  }
+  const parts = ctx.message?.text?.trim().split(/\s+/) || [];
+  const mint = mintArg || parts[1]; const amount = Number(amountArg || parts[2]); const action = side === 'buy' ? 'شراء' : 'بيع';
+  if (!mint || (fraction === null && (!Number.isFinite(amount) || amount <= 0))) return ctx.reply(`استخدم /${side} <عنوان_العملة> <${side === 'buy' ? 'مقدار_SOL' : 'مقدار_العملة'}>`);
+  const s = settingsForAdmin();
+  if (!canTrade(s)) return ctx.reply('تم الوصول إلى حد الصفقات اليومية المحدد في الإعدادات.');
   try {
     const tokenSide = side === 'sell';
-    const inputAmount = tokenSide
-      ? await getTokenAmount({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint, uiAmount: amount })
-      : { raw: Math.round(amount * 1e9) };
-    const quote = await getQuote({
-      jupiterUrl: config.jupiterUrl,
-      inputMint: tokenSide ? mint : SOL_MINT,
-      outputMint: tokenSide ? SOL_MINT : mint,
-      amountLamports: inputAmount.raw,
-      slippageBps: 100
-    });
-    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: config.liveTrading });
-    if (result.simulated) return ctx.reply(`معاينة ${action} — وضع تجريبي\nعنوان المحفظة: ${result.wallet}\nلم تُرسل أي معاملة إلى الشبكة.`);
-    await ctx.reply(`${action} مؤكّد بنجاح\nتوقيع المعاملة: ${result.signature}\nرابط Solscan: ${explorer(result.signature)}`);
-  } catch (error) {
-    await ctx.reply(`تعذر تنفيذ ${action}.\n${error.message}`);
-  }
+    const inputAmount = tokenSide ? (fraction === null ? await getTokenAmount({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint, uiAmount: amount }) : await getTokenBalance({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint, fraction })) : { raw: Math.round(amount * 1e9) };
+    const quote = await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: tokenSide ? mint : SOL_MINT, outputMint: tokenSide ? SOL_MINT : mint, amountLamports: inputAmount.raw, slippageBps: 100 });
+    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: s.liveTrading });
+    s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+    if (result.simulated) return ctx.reply(`معاينة ${action} — الوضع التجريبي\nلم تُرسل معاملة.`, { reply_markup: tradeMenu(mint) });
+    await ctx.reply(`${action} مؤكّد\nالتوقيع: ${result.signature}\n${explorer(result.signature)}`, { reply_markup: tradeMenu(mint) });
+  } catch (e) { await ctx.reply(`تعذر تنفيذ ${action}.\n${e.message}`); }
 }
 
-bot.callbackQuery('wallet', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('لعرض عنوان المحفظة، استخدم الأمر /wallet'); });
-bot.callbackQuery('portfolio', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('لعرض الأرصدة، استخدم الأمر /portfolio'); });
-bot.callbackQuery('snipe', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('للمشرف: استخدم /buy <عنوان_العملة> <مقدار_SOL> لتنفيذ معاينة شراء.'); });
-bot.callbackQuery('settings', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply(isAdmin(ctx) ? 'الإعدادات تُدار من بيئة النشر.' : 'هذا القسم متاح للمشرف فقط.'); });
-bot.catch((error) => console.error('Telegram bot error:', error.error));
+bot.callbackQuery('wallet', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('استخدم /wallet لعرض العنوان.'); });
+bot.callbackQuery('portfolio', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('استخدم /portfolio لعرض الأرصدة.'); });
+bot.callbackQuery('snipe', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('للمشرف: استخدم /settings لضبط الفلاتر، ثم /settings sniper on لتشغيل مراقبة Pump.fun.'); });
+bot.callbackQuery('settings', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا القسم متاح للمشرف فقط.'); await ctx.reply(settingsText(settingsForAdmin())); });
+bot.callbackQuery(/^toggle:(sniper|live)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const [, key] = ctx.callbackQuery.data.split(':'); const s = settingsForAdmin(); if (key === 'sniper') s.autoSniperEnabled = !s.autoSniperEnabled; else s.liveTrading = !s.liveTrading; saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); if (s.autoSniperEnabled) watcher.start(); else watcher.stop(); await ctx.reply(settingsText(s)); });
+bot.callbackQuery(/^(buy|sell):([^:]+):(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const [, side, mint, value] = ctx.callbackQuery.data.split(':'); await trade(ctx, side, mint, side === 'buy' ? value : null, side === 'sell' ? Number(value) : null); });
+
+const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onCandidate: async (candidate) => {
+  const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
+  if (!s.autoSniperEnabled) return;
+  if (!canTrade(s)) return bot.api.sendMessage(config.adminId, 'تم إيقاف القنص تلقائياً بسبب بلوغ حد الصفقات اليومية.');
+  try {
+    const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(s.tradeSizeSol * 1e9), slippageBps: 100 });
+    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: s.liveTrading });
+    s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+    const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
+    await bot.api.sendMessage(config.adminId, `قنص آلي من Pump.fun\n${candidate.name} (${candidate.symbol})\nالعنوان: ${candidate.mint}\nحجم الصفقة: ${s.tradeSizeSol} SOL\n${status}`, { reply_markup: tradeMenu(candidate.mint) });
+  } catch (error) { await bot.api.sendMessage(config.adminId, `فشل القنص الآلي لهذه العملة:\n${error.message}`); }
+}});
+function startWatcher() { if (settingsForAdmin().autoSniperEnabled) watcher.start(); }
 module.exports = bot;
+module.exports.startWatcher = startWatcher;
+module.exports.watcher = watcher;
