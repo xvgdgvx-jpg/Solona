@@ -13,8 +13,8 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   const outAmount = Number(quote.outAmount);
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
   const existing = positions.find((p) => p.mint === mint && p.status === 'open');
-  if (existing) { existing.investedSol += investedSol; existing.tokenAmountRaw += outAmount; existing.updatedAt = Date.now(); }
-  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, decimals: 0, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
+  if (existing) { existing.investedSol += investedSol; existing.tokenAmountRaw += outAmount; existing.tokenAmount = existing.tokenAmountRaw / (10 ** existing.decimals); existing.entryPriceSol = existing.investedSol / existing.tokenAmount; existing.updatedAt = Date.now(); }
+  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, tokenAmount: outAmount / (10 ** Number(metadata.decimals ?? 6)), decimals: Number(metadata.decimals ?? 6), entryPriceSol: investedSol / (outAmount / (10 ** Number(metadata.decimals ?? 6))), entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
   savePositions(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }

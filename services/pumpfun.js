@@ -53,6 +53,7 @@ class PumpFunWatcher {
       mint: coin.mint || coin.address,
       name: coin.name || 'بدون اسم',
       symbol: coin.symbol || 'N/A',
+      decimals: Number(coin.decimals ?? 6),
       marketCapUsd: Number(coin.market_cap ?? coin.usd_market_cap ?? 0),
       liquiditySol: Number(coin.liquidity_sol ?? coin.virtual_sol_reserves ?? coin.sol_reserves ?? 0) / (coin.virtual_sol_reserves ? 1e9 : 1),
       mintAuthority: coin.mint_authority ?? coin.mintAuthority ?? null,
