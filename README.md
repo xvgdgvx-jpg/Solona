@@ -8,7 +8,7 @@ The default is **dry run**. No transaction is sent unless `LIVE_TRADING=true` is
 
 ## Render
 
-Use a Node web service with build command `npm install` and start command `npm start`. Configure the required variables listed in `.env.example`: `TELEGRAM_BOT_TOKEN`, `SOLANA_RPC_URL`, `ENCRYPTION_KEY` (64 hexadecimal characters), `MASTER_WALLET_PRIVATE_KEY`, and `ADMIN_TELEGRAM_ID`. Optional variables are `LIVE_TRADING`, `JUPITER_API_URL`, `KEEPALIVE_URL`, and `PORT`.
+Use a Node web service with build command `npm install` and start command `npm start`. Configure the required variables listed in `.env.example`: `TELEGRAM_BOT_TOKEN`, `SOLANA_RPC_URL`, `ENCRYPTION_KEY` (64 hexadecimal characters), and `ADMIN_TELEGRAM_ID`. Set `PHANTOM_MNEMONIC` to the 12-word recovery phrase; the bot validates it, derives the wallet using `m/44'/501'/0'/0'`, and uses the resulting Solana Keypair automatically. `SOLANA_MNEMONIC` and `MASTER_WALLET_MNEMONIC` are accepted aliases. `MASTER_WALLET_PRIVATE_KEY` remains a fallback for an existing Base58 key or JSON array of 64 bytes. Never commit, log, or share either secret format. Optional variables are `LIVE_TRADING`, `JUPITER_API_URL`, `KEEPALIVE_URL`, and `PORT`.
 
 The service exposes `GET /health` and binds to `PORT` or 3000. The keep-alive request is best-effort and never crashes the process. Render sleep prevention is platform-dependent; self-pinging does not guarantee a free-tier instance remains awake.
 
