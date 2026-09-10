@@ -72,6 +72,7 @@ async function trade(ctx, side, mintArg, amountArg, fraction = null) {
         const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint, investedSol: amount, quote });
         const current = await refreshPositions({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
         const value = current.values.find((p) => p.id === position.id);
+        if (!value || value.pricingError) return ctx.reply(`تم تسجيل الشراء التجريبي، لكن لا يوجد Route للبيع حالياً.\nالعنوان: ${mint}\nسيتمكن البوت من حساب PnL عند توفر السيولة.\nلم تُرسل أي معاملة.`);
         return ctx.reply(`تمت محاكاة الشراء ببيانات حقيقية من Jupiter\nالعنوان: ${mint}\nالمبلغ الافتراضي: ${amount} SOL\nالقيمة الحالية: ${value.currentSol.toFixed(6)} SOL\nPnL: ${value.pnlSol >= 0 ? '+' : ''}${value.pnlSol.toFixed(6)} SOL (${value.pnlPct.toFixed(2)}٪)\nلم تُرسل أي معاملة.`, { reply_markup: paperMenu(position.id) });
       }
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.mint === mint && p.status === 'open');
@@ -90,7 +91,7 @@ async function sendPnl(ctx) {
   try {
     const { values, solUsd } = await refreshPositions({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
     if (!values.length) return ctx.reply('لا توجد مراكز Paper Trading مفتوحة. استخدم /buy أو شغّل القنص في الوضع التجريبي.');
-    const lines = values.map((p) => `${p.mint}\nالمستثمر: ${p.investedSol.toFixed(6)} SOL\nالقيمة الحالية: ${p.currentSol.toFixed(6)} SOL\nPnL: ${p.pnlSol >= 0 ? '+' : ''}${p.pnlSol.toFixed(6)} SOL (${p.pnlPct.toFixed(2)}٪)${solUsd ? `\nPnL بالدولار: ${(p.pnlSol * solUsd).toFixed(2)} USD` : ''}`);
+    const lines = values.map((p) => p.pricingError ? `${p.mint}\nالمستثمر: ${p.investedSol.toFixed(6)} SOL\nالسعر الحالي: غير متاح مؤقتاً\nالسبب: ${p.pricingError}` : `${p.mint}\nالمستثمر: ${p.investedSol.toFixed(6)} SOL\nالقيمة الحالية: ${p.currentSol.toFixed(6)} SOL\nPnL: ${p.pnlSol >= 0 ? '+' : ''}${p.pnlSol.toFixed(6)} SOL (${p.pnlPct.toFixed(2)}٪)${solUsd ? `\nPnL بالدولار: ${(p.pnlSol * solUsd).toFixed(2)} USD` : ''}`);
     await ctx.reply(`حالة Paper Trading اللحظية\nسعر SOL: ${solUsd ? `${solUsd.toFixed(2)} USD` : 'غير متاح'}\n\n${lines.join('\n\n')}`, { reply_markup: paperMenu(values[0].id) });
   } catch (error) { await ctx.reply(`تعذر تحديث PnL من بيانات السوق الحية.\n${error.message}`); }
 }
@@ -121,7 +122,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
     const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
     await bot.api.sendMessage(config.adminId, `قنص آلي من Pump.fun\n${candidate.name} (${candidate.symbol})\nالعنوان: ${candidate.mint}\nحجم الصفقة: ${s.tradeSizeSol} SOL\n${status}`, { reply_markup: tradeMenu(candidate.mint) });
-  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) { lastSniperErrorAt = now; await bot.api.sendMessage(config.adminId, `تعذر الحصول على سعر القنص الآلي حالياً.\n${error.message}\nسيتم إعادة المحاولة، ولن تتكرر رسالة الخطأ قبل 10 دقائق.`); } }
+  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) { lastSniperErrorAt = now; await bot.api.sendMessage(config.adminId, `لا يوجد سعر/Route متاح لهذه العملة حالياً أو أن Jupiter مشغول.\nسيعيد البوت المحاولة تلقائياً، ولن تتكرر رسالة التنبيه قبل 10 دقائق.`); } }
 }});
 function startWatcher() { if (settingsForAdmin().autoSniperEnabled) { console.log('Pump.fun watcher started; polling every 30 seconds'); watcher.start(); } }
 module.exports = bot;

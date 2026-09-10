@@ -19,9 +19,13 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }
 async function valuePosition({ jupiterUrl, position }) {
-  const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: position.tokenAmountRaw, slippageBps: 100 });
-  const currentSol = Number(quote.outAmount) / 1e9;
-  return { ...position, currentSol, pnlSol: currentSol - position.investedSol, pnlPct: position.investedSol ? ((currentSol / position.investedSol) - 1) * 100 : 0, quote };
+  try {
+    const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: position.tokenAmountRaw, slippageBps: 100 });
+    const currentSol = Number(quote.outAmount) / 1e9;
+    return { ...position, currentSol, pnlSol: currentSol - position.investedSol, pnlPct: position.investedSol ? ((currentSol / position.investedSol) - 1) * 100 : 0, quote, pricingError: null };
+  } catch (error) {
+    return { ...position, currentSol: null, pnlSol: null, pnlPct: null, quote: null, pricingError: error.message };
+  }
 }
 async function refreshPositions({ adminId, key, jupiterUrl }) {
   const positions = getPositions(adminId, key).filter((p) => p.status === 'open');
@@ -34,6 +38,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
   const position = positions.find((p) => p.id === positionId && p.status === 'open');
   if (!position) throw new Error('المركز الافتراضي غير موجود أو مغلق.');
   const value = await valuePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
+  if (value.pricingError) throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
   if (fraction >= 1) position.status = 'closed';
   else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; }
   position.updatedAt = Date.now();

@@ -6,6 +6,8 @@ const bs58 = bs58Module.default || bs58Module;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const connection = (rpcUrl) => new Connection(rpcUrl, 'confirmed');
+let lastQuoteAt = 0;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function validateSecretBytes(value) {
   if (!Array.isArray(value) || value.length !== 64 || value.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
@@ -36,11 +38,28 @@ function keypairFromSecret(secret) {
 async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLamports, slippageBps = 100 }) {
   try {
     if (!inputMint || !outputMint || !PublicKey.isOnCurve(new PublicKey(outputMint).toBytes())) throw new Error('عنوان العملة غير صالح.');
-    const { data } = await axios.get(`${jupiterUrl}/quote`, { params: { inputMint, outputMint, amount: amountLamports, slippageBps, swapMode: 'ExactIn' }, timeout: 8000 });
-    return data;
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const wait = Math.max(0, 350 - (Date.now() - lastQuoteAt));
+      if (wait) await sleep(wait);
+      try {
+        lastQuoteAt = Date.now();
+        const { data } = await axios.get(`${jupiterUrl}/quote`, { params: { inputMint, outputMint, amount: amountLamports, slippageBps, swapMode: 'ExactIn' }, timeout: 8000 });
+        return data;
+      } catch (error) {
+        lastError = error;
+        if (error.response?.status !== 429 || attempt === 2) break;
+        const retryAfter = Number(error.response.headers?.['retry-after'] || 0);
+        await sleep(Math.min(10000, Math.max(1000, retryAfter * 1000 || (attempt + 1) * 1500)));
+      }
+    }
+    throw lastError;
   } catch (error) {
     if (error.message === 'عنوان العملة غير صالح.') throw error;
-    throw new Error(`تعذر الحصول على سعر العملة: ${error.response?.data?.error || error.message}`);
+    const detail = error.response?.data?.error || error.message;
+    if (String(detail).toLowerCase().includes('no routes found')) throw new Error('لا يوجد مسار تداول لهذه العملة حالياً؛ قد تكون جديدة جداً أو بلا سيولة في Jupiter.');
+    if (error.response?.status === 429) throw new Error('Jupiter مشغول حالياً بسبب كثرة الطلبات؛ أعد المحاولة بعد قليل.');
+    throw new Error(`تعذر الحصول على سعر العملة: ${detail}`);
   }
 }
 
