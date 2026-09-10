@@ -13,6 +13,9 @@ const defaults = {
   paperEvents: [],
   paperPnlSol: 0,
   paperTakeProfitPct: 50,
+  paperStopLossPct: 15,
+  paperTakeProfitFirstPct: 30,
+  paperTakeProfitFinalPct: 60,
   liveTrading: false,
   tradeSizeSol: 0.1,
   maxTradesPerDay: 0,
@@ -21,7 +24,8 @@ const defaults = {
   minLiquiditySol: 5,
   maxMarketCapUsd: 100000,
   requireRenouncedAuthorities: true,
-  lastMint: null
+  lastMint: null,
+  lastFilterResult: 'لم يبدأ الفحص بعد'
 };
 
 function getSettings(adminId, key) {

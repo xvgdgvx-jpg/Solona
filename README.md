@@ -35,3 +35,13 @@ npm start
 ```
 
 Do not commit `.env`, private keys, or the encrypted `data/` directory.
+
+## Helius safety mode
+
+When `HELIUS_API_KEY` is configured, the Pump.fun watcher uses Helius `transactionSubscribe` over WebSocket for low-latency mint detection and Helius DAS/RPC calls (`getAsset`, `getTokenLargestAccounts`, and creator token-account inspection) before a candidate can reach the trading engine. Without the key, the service uses the existing Pump.fun HTTP fallback and does not claim Helius coverage.
+
+Paper candidates are rejected unless they have a non-empty name, a social/contact link, renounced Mint/Freeze authorities, Bonding Curve progress between 10% and 35%, at least $2,500 volume, at least 15 unique buyers, buy volume greater than sell volume, creator holdings at or below 5%, and top-ten holdings at or below 25% after excluding the bonding-curve account when known. The latest rejection reason is shown in the single Telegram control panel rather than sent as a separate message.
+
+Paper exit management includes a full stop-loss at -15%, a 50% take-profit at +30%, and closure of the remaining position at +60%. Paper trading can hold multiple positions while available capital covers the configured fixed position size; every position is valued independently and realized proceeds are returned to available capital.
+
+The service remains paper-only while `LIVE_TRADING=false`. A Helius API key should be stored only in the hosting provider's environment variables and never committed to Git.

@@ -47,5 +47,9 @@ module.exports = {
   liveTrading: String(process.env.LIVE_TRADING).toLowerCase() === 'true',
   jupiterUrl,
   port: Number(process.env.PORT || 3000),
-  keepAliveUrl: process.env.KEEPALIVE_URL || `http://127.0.0.1:${process.env.PORT || 3000}/health`
+  keepAliveUrl: process.env.KEEPALIVE_URL || `http://127.0.0.1:${process.env.PORT || 3000}/health`,
+  heliusApiKey: process.env.HELIUS_API_KEY || '',
+  heliusRpcUrl: process.env.HELIUS_RPC_URL || '',
+  heliusWsUrl: process.env.HELIUS_WS_URL || '',
+  priorityFeeMaxLamports: Number(process.env.PRIORITY_FEE_MAX_LAMPORTS || 500000)
 };

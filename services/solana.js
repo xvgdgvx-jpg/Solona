@@ -91,11 +91,11 @@ async function getTokenBalance({ rpcUrl, ownerSecret, mint, fraction = 1 }) {
   }
 }
 
-async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading }) {
+async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, priorityFeeMaxLamports = 500000 }) {
   const wallet = keypairFromSecret(secret);
   if (!liveTrading) return { simulated: true, wallet: wallet.publicKey.toBase58(), message: 'الوضع التجريبي: لم تُرسل أي معاملة.' };
   try {
-    const { data } = await axios.post(`${jupiterUrl}/swap`, { quoteResponse: quote, userPublicKey: wallet.publicKey.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true }, { timeout: 15000 });
+    const { data } = await axios.post(`${jupiterUrl}/swap`, { quoteResponse: quote, userPublicKey: wallet.publicKey.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: { priorityLevelWithMaxLamports: { priorityLevel: 'veryHigh', maxLamports: priorityFeeMaxLamports } } }, { timeout: 15000 });
     const transaction = VersionedTransaction.deserialize(Buffer.from(data.swapTransaction, 'base64'));
     transaction.sign([wallet]);
     const conn = connection(rpcUrl);

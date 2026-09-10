@@ -4,6 +4,7 @@ const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, SO
 const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
 const { openPosition, refreshPositions, closePosition, getPositions } = require('../services/paper');
+const { getUser, saveUser } = require('../services/storage');
 
 const bot = new Bot(config.token);
 const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
@@ -26,7 +27,7 @@ const allocationKeyboard = () => new InlineKeyboard().text('10٪', 'set:allocati
 const dailyKeyboard = () => new InlineKeyboard().text('مفتوح', 'set:daily:0').text('5', 'set:daily:5').text('10', 'set:daily:10').text('50', 'set:daily:50').row().text('رجوع', 'cfg:allocation');
 const profitKeyboard = () => new InlineKeyboard().text('5٪', 'set:profit:5').text('10٪', 'set:profit:10').text('25٪', 'set:profit:25').row().text('50٪', 'set:profit:50').text('75٪', 'set:profit:75').text('100٪', 'set:profit:100').row().text('رجوع', 'cfg:daily');
 const sizingKeyboard = () => new InlineKeyboard().text('صفقة معزولة', 'set:sizing:isolated').row().text('شراء موسّع', 'set:sizing:expanded').row().text('رجوع', 'cfg:profit');
-function panelText(s) { const events = (s.paperEvents || []).slice(-5).reverse(); const eventText = events.length ? events.map((e) => `${e.type}: ${e.name || e.mint} — ${e.detail}`).join('\n') : 'لا توجد عمليات بعد'; const openPositions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open'); const reserved = openPositions.reduce((sum, p) => sum + Number(p.investedSol || 0), 0); return `لوحة القنص التجريبي\n\nالحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'}\nالشراء التجريبي: ${s.paperTradingEnabled ? 'مفعّل' : 'متوقف'}\nالبيع التلقائي عند الهدف: ${s.autoSellEnabled ? 'مفعّل' : 'متوقف'}\nرأس المال الأصلي: ${Number(s.paperCapitalSol).toFixed(4)} SOL\nالرصيد المتاح للشراء: ${Number(s.paperAvailableSol).toFixed(4)} SOL\nالمبلغ المحجوز في المراكز: ${reserved.toFixed(4)} SOL\nالمراكز المفتوحة: ${openPositions.length}\nإجمالي الأرباح المحققة: ${Number(s.paperPnlSol || 0).toFixed(4)} SOL\nهدف البيع: +${s.paperTakeProfitPct}%\nالحجم: ${s.paperAllocationPct}% — ${s.paperSizingMode === 'expanded' ? 'موسّع' : 'معزول'}\nالحد اليومي: ${s.maxTradesPerDay || 'مفتوح'}\n\nآخر العمليات:\n${eventText}\n\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'متوقف وآمن'}`; }
+function panelText(s) { const events = (s.paperEvents || []).slice(-5).reverse(); const eventText = events.length ? events.map((e) => `${e.type}: ${e.name || e.mint} — ${e.detail}`).join('\n') : 'لا توجد عمليات بعد'; const openPositions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open'); const reserved = openPositions.reduce((sum, p) => sum + Number(p.investedSol || 0), 0); return `لوحة القنص التجريبي\n\nالحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'}\nالشراء التجريبي: ${s.paperTradingEnabled ? 'مفعّل' : 'متوقف'}\nالبيع التلقائي عند الهدف: ${s.autoSellEnabled ? 'مفعّل' : 'متوقف'}\nرأس المال الأصلي: ${Number(s.paperCapitalSol).toFixed(4)} SOL\nالرصيد المتاح للشراء: ${Number(s.paperAvailableSol).toFixed(4)} SOL\nالمبلغ المحجوز في المراكز: ${reserved.toFixed(4)} SOL\nالمراكز المفتوحة: ${openPositions.length}\nإجمالي الأرباح المحققة: ${Number(s.paperPnlSol || 0).toFixed(4)} SOL\nهدف البيع: +${s.paperTakeProfitPct}% | SL: -${s.paperStopLossPct}% | TP1/TP2: ${s.paperTakeProfitFirstPct}%/${s.paperTakeProfitFinalPct}%\nآخر فحص Helius/الفلاتر: ${s.lastFilterResult || 'لا يوجد'}\nالحجم: ${s.paperAllocationPct}% — ${s.paperSizingMode === 'expanded' ? 'موسّع' : 'معزول'}\nالحد اليومي: ${s.maxTradesPerDay || 'مفتوح'}\n\nآخر العمليات:\n${eventText}\n\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'متوقف وآمن'}`; }
 function detailsText(s) { const events = (s.paperEvents || []).slice().reverse(); return `تفاصيل عمليات Paper Trading\n\n${events.length ? events.map((e, i) => `${i + 1}. ${e.type}\n${e.name || 'بدون اسم'}\nالعقد: ${shortAddress(e.mint)}\n${e.detail}`).join('\n\n') : 'لا توجد عمليات مسجلة بعد.'}`; }
 function detailsKeyboard(s) { const keyboard = new InlineKeyboard(); (s.paperEvents || []).slice().reverse().forEach((e, i) => keyboard.copyText(`نسخ عقد ${i + 1}`, e.mint).row()); return keyboard.text('رجوع', 'panel:back'); }
 const paperTradeAmount = (s) => (Number(s.paperCapitalSol || 1) + (s.paperSizingMode === 'expanded' ? Number(s.paperPnlSol || 0) : 0)) * Number(s.paperAllocationPct || 10) / 100;
@@ -96,7 +97,7 @@ async function trade(ctx, side, mintArg, amountArg, fraction = null) {
       const closed = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: position.id, fraction: fraction === null ? 1 : fraction, jupiterUrl: config.jupiterUrl });
       return ctx.reply(`تمت محاكاة البيع بنسبة ${Math.round((fraction || 1) * 100)}٪\nالقيمة: ${closed.currentSol.toFixed(6)} SOL\nالربح/الخسارة: ${closed.pnlSol >= 0 ? '+' : ''}${closed.pnlSol.toFixed(6)} SOL (${closed.pnlPct.toFixed(2)}٪)\nلم تُرسل أي معاملة.`);
     }
-    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s) });
+    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s), priorityFeeMaxLamports: config.priorityFeeMaxLamports });
     s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
     if (result.simulated) return ctx.reply(`معاينة ${action} — الوضع التجريبي\nلم تُرسل معاملة.`, { reply_markup: tradeMenu(mint) });
     await ctx.reply(`${action} مؤكّد\nالتوقيع: ${result.signature}\n${explorer(result.signature)}`, { reply_markup: tradeMenu(mint) });
@@ -128,7 +129,7 @@ bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbac
 
 let lastSniperErrorAt = 0;
 let paperMonitorBusy = false;
-const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onCandidate: async (candidate) => {
+const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onFilter: (candidate, reason) => { const s = settingsForAdmin(); s.lastFilterResult = `${candidate.symbol || candidate.mint}: مرفوض — ${reason}`; saveSettings(config.adminId, s, config.encryptionKey); updatePanel(s); }, onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   if (!s.autoSniperEnabled) return;
   if (!canTrade(s)) return;
@@ -145,7 +146,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
       saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
       return;
     }
-    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s) });
+    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s), priorityFeeMaxLamports: config.priorityFeeMaxLamports });
     s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
     const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
     console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
@@ -158,9 +159,14 @@ async function monitorPaperPositions() {
   try {
     const { values } = await refreshPositions({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
     for (const value of values) {
-      if (value.pricingError || value.pnlPct < Number(s.paperTakeProfitPct || 50)) continue;
-      const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction: 1, jupiterUrl: config.jupiterUrl });
-      s.paperAvailableSol = Number(s.paperAvailableSol) + sold.currentSol; s.paperPnlSol = Number(s.paperPnlSol || 0) + sold.pnlSol; s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${sold.currentSol.toFixed(4)} SOL | ربح ${sold.pnlSol.toFixed(4)} SOL (${sold.pnlPct.toFixed(1)}٪)` }].slice(-10); saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
+      if (value.pricingError) continue;
+      const stopLoss = Number(s.paperStopLossPct || 15); const firstTarget = Number(s.paperTakeProfitFirstPct || 30); const finalTarget = Number(s.paperTakeProfitFinalPct || 60);
+      const fraction = value.pnlPct <= -stopLoss ? 1 : value.pnlPct >= finalTarget ? 1 : (value.pnlPct >= firstTarget && !value.tp1Sold ? 0.5 : 0);
+      if (!fraction) continue;
+      const reason = value.pnlPct <= -stopLoss ? `وقف خسارة -${stopLoss}%` : (fraction === 0.5 ? `جني ربح +${firstTarget}% — بيع 50%` : `جني ربح +${finalTarget}% — إغلاق الباقي`);
+      const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction, jupiterUrl: config.jupiterUrl });
+      const positionAfter = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id); if (fraction < 1 && positionAfter) { positionAfter.tp1Sold = true; const user = getUser(config.adminId, config.encryptionKey); saveUser(config.adminId, { ...user, paperPositions: getPositions(config.adminId, config.encryptionKey) }, config.encryptionKey); }
+      s.paperAvailableSol = Number(s.paperAvailableSol) + sold.currentSol; s.paperPnlSol = Number(s.paperPnlSol || 0) + sold.pnlSol; s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${reason} | ${sold.currentSol.toFixed(4)} SOL | ربح/خسارة ${sold.pnlSol.toFixed(4)} SOL (${sold.pnlPct.toFixed(1)}٪)` }].slice(-10); saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
     }
   } catch (error) { console.error(`Paper position monitor error: ${error.message}`); }
   finally { paperMonitorBusy = false; }
