@@ -12,14 +12,20 @@ class PumpFunWatcher {
     this.onError = onError;
     this.running = false;
     this.seen = new Set();
+    this.lastPollAt = null;
+    this.lastCandidate = null;
+    this.lastError = null;
   }
   updateSettings(settings) { this.settings = settings; }
   start() { if (!this.running) { this.running = true; this.loop(); } }
   stop() { this.running = false; }
+  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastCandidate: this.lastCandidate, lastError: this.lastError }; }
   async loop() {
     while (this.running) {
       try {
+        this.lastPollAt = new Date().toISOString();
         const { data } = await axios.get(process.env.PUMPFUN_API_URL || DEFAULT_URL, { params: { offset: 0, limit: 25, sort: 'created_timestamp', order: 'DESC', includeNsfw: false }, timeout: 10000 });
+        this.lastError = null;
         const coins = Array.isArray(data) ? data : (data.coins || data.data || []);
         for (const coin of coins.reverse()) {
           const mint = coin.mint || coin.address;
@@ -27,9 +33,9 @@ class PumpFunWatcher {
           this.seen.add(mint);
           if (this.seen.size > 2000) this.seen.delete(this.seen.values().next().value);
           const candidate = this.normalize(coin);
-          if (this.matches(candidate)) await this.onCandidate(candidate);
+          if (this.matches(candidate)) { this.lastCandidate = candidate; await this.onCandidate(candidate); }
         }
-      } catch (error) { this.onError(error); }
+      } catch (error) { this.lastError = error.message; this.onError(error); }
       await sleep(30000);
     }
   }
