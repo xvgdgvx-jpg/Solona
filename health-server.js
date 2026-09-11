@@ -7,6 +7,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 let server = null;
 let pingTimer = null;
+let positionsCache = { value: null, timestamp: 0 };
 
 global.START_TIME = global.START_TIME || null;
 global.LAST_ACTIVITY = global.LAST_ACTIVITY || null;
@@ -65,7 +66,11 @@ app.get('/helius-status', (_req, res) => {
     const config = require('./config');
     const { getPositions } = require('./services/paper');
     const w = bot.watcher;
-    const positions = getPositions(config.adminId, config.encryptionKey);
+    const now = Date.now();
+    if (!positionsCache.value || now - positionsCache.timestamp >= 5000) {
+      positionsCache = { value: getPositions(config.adminId, config.encryptionKey), timestamp: now };
+    }
+    const positions = positionsCache.value;
     res.json({
       helius: {
         streamMode: w?.streamMode || false,

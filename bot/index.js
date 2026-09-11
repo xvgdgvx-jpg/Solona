@@ -168,8 +168,8 @@ function detailsKeyboard(s) { const keyboard = new InlineKeyboard(); (s.paperEve
 const paperTradeAmount = (s) => (Number(s.paperCapitalSol || 1) + (s.paperSizingMode === 'expanded' ? Number(s.paperPnlSol || 0) : 0)) * Number(s.paperAllocationPct || 10) / 100;
 const panelEditQueue = new Map();
 function retryAfterMs(error) { const seconds = Number(error?.parameters?.retry_after || error?.response?.parameters?.retry_after || 1); return Math.min(Math.max(seconds, 1) * 1000, 10000); }
-async function flushPanelEdit(key) { const entry = panelEditQueue.get(key); if (!entry || entry.running || !entry.pending) return; entry.running = true; const pending = entry.pending; entry.pending = null; try { await bot.api.editMessageText(pending.chatId, pending.messageId, pending.text, { reply_markup: pending.keyboard }); } catch (error) { if (error?.error_code === 429 || error?.response?.status === 429) { entry.pending = pending; await new Promise((resolve) => setTimeout(resolve, retryAfterMs(error))); } else if (!String(error.message || '').includes('message is not modified')) console.error(`Panel update error: ${error.message}`); } finally { entry.running = false; if (entry.pending) { clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 500); } } }
-function updatePanel(s = settingsForAdmin()) { const chatId = String(s.paperPanelChatId || config.adminId); const messageId = s.paperPanelMessageId; if (!messageId) return Promise.resolve(); const key = `${chatId}:${messageId}`; const entry = panelEditQueue.get(key) || { pending: null, running: false, timer: null }; entry.pending = { chatId, messageId, text: panelText(s), keyboard: panelKeyboard(s) }; panelEditQueue.set(key, entry); clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 500); return Promise.resolve(); }
+async function flushPanelEdit(key) { const entry = panelEditQueue.get(key); if (!entry || entry.running || !entry.pending) return; entry.running = true; const pending = entry.pending; entry.pending = null; try { await bot.api.editMessageText(pending.chatId, pending.messageId, pending.text, { reply_markup: pending.keyboard }); } catch (error) { if (error?.error_code === 429 || error?.response?.status === 429) { entry.pending = pending; await new Promise((resolve) => setTimeout(resolve, retryAfterMs(error))); } else if (!String(error.message || '').includes('message is not modified')) console.error(`Panel update error: ${error.message}`); } finally { entry.running = false; if (entry.pending) { clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 3000); } } }
+function updatePanel(s = settingsForAdmin()) { const chatId = String(s.paperPanelChatId || config.adminId); const messageId = s.paperPanelMessageId; if (!messageId) return Promise.resolve(); const key = `${chatId}:${messageId}`; const entry = panelEditQueue.get(key) || { pending: null, running: false, timer: null }; entry.pending = { chatId, messageId, text: panelText(s), keyboard: panelKeyboard(s) }; panelEditQueue.set(key, entry); clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 3000); return Promise.resolve(); }
 async function recordPaperSale(value, sold, reason, triggerType = 'Manual') {
   const s = settingsForAdmin();
   if (value.mode !== 'live') {
@@ -303,7 +303,9 @@ bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbac
 let lastSniperErrorAt = 0;
 let paperMonitorBusy = false;
 let watcherManuallyEnabled = false;
-const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onFilter: (candidate, reason) => { const s = settingsForAdmin(); s.lastFilterResult = `${candidate.symbol || candidate.mint}: مرفوض — ${reason}`; s.rejectStats = s.rejectStats || {}; const cleanReason = reason.replace(/—.*$/, '').trim(); const key = cleanReason.length > 40 ? cleanReason.slice(0, 40) + '…' : cleanReason; s.rejectStats[key] = (s.rejectStats[key] || 0) + 1; s.checkedCount = (s.checkedCount || 0) + 1; s.lastCheckAt = new Date().toISOString(); saveSettings(config.adminId, s, config.encryptionKey); updatePanel(s); }, onCandidate: async (candidate) => {
+let _rejectBuf = {};
+let _checkedBuf = 0;
+const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onFilter: (_candidate, reason) => { const key = reason.replace(/—.*$/, '').trim().slice(0, 40); _rejectBuf[key] = (_rejectBuf[key] || 0) + 1; _checkedBuf += 1; }, onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   const safetyBlock = await checkSafetyRails(s);
   if (safetyBlock) { console.log(safetyBlock); return; }
@@ -455,7 +457,25 @@ async function monitorPaperPositions() {
     if (cycleMs > 500) console.warn(`[monitor] دورة بطيئة: ${cycleMs}ms`);
   }
 }
-setInterval(monitorPaperPositions, 50);
+setInterval(monitorPaperPositions, 500);
+let _rejectFlushRunning = false;
+setInterval(() => {
+  if (!_checkedBuf || _rejectFlushRunning) return;
+  _rejectFlushRunning = true;
+  const rejectBuf = _rejectBuf;
+  const checkedBuf = _checkedBuf;
+  _rejectBuf = {};
+  _checkedBuf = 0;
+  const s = settingsForAdmin();
+  s.rejectStats = s.rejectStats || {};
+  for (const [key, value] of Object.entries(rejectBuf)) s.rejectStats[key] = (s.rejectStats[key] || 0) + value;
+  s.checkedCount = (s.checkedCount || 0) + checkedBuf;
+  s.lastCheckAt = new Date().toISOString();
+  saveSettings(config.adminId, s, config.encryptionKey)
+    .then(() => updatePanel(s))
+    .catch((error) => console.error(`[stats] حفظ إحصاءات الرفض فشل: ${error.message}`))
+    .finally(() => { _rejectFlushRunning = false; });
+}, 10000);
 setInterval(() => {
   cleanupStaleClosing(config.adminId, config.encryptionKey).catch((error) => console.error(`[cleanup] ${error.message}`));
 }, 60 * 1000);

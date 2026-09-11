@@ -75,9 +75,20 @@ function getSettings(adminId, key) {
   return settings;
 }
 
+let _lock = Promise.resolve();
+function withLock(fn) {
+  const previous = _lock;
+  let release;
+  _lock = new Promise((resolve) => { release = resolve; });
+  return previous.then(fn).finally(() => release());
+}
+
 function saveSettings(adminId, settings, key) {
-  const user = getUser(adminId, key);
-  saveUser(adminId, { ...user, settings: { ...defaults, ...settings } }, key);
+  return withLock(() => {
+    const user = getUser(adminId, key);
+    const latestSettings = { ...defaults, ...(user.settings || {}) };
+    saveUser(adminId, { ...user, settings: { ...latestSettings, ...settings } }, key);
+  });
 }
 
 function canTrade(settings) {
