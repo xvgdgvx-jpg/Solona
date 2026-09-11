@@ -3,7 +3,7 @@ const bip39 = require('bip39');
 const { derivePath } = require('ed25519-hd-key');
 const { Keypair } = require('@solana/web3.js');
 
-const required = ['TELEGRAM_BOT_TOKEN', 'SOLANA_RPC_URL', 'ENCRYPTION_KEY', 'ADMIN_TELEGRAM_ID'];
+const required = ['TELEGRAM_BOT_TOKEN', 'ENCRYPTION_KEY', 'ADMIN_TELEGRAM_ID'];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
 
@@ -36,10 +36,14 @@ const encryptionKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
 if (encryptionKey.length !== 32) throw new Error('ENCRYPTION_KEY must be a 64-character hexadecimal AES-256 key');
 const configuredJupiterUrl = process.env.JUPITER_API_URL || '';
 const jupiterUrl = configuredJupiterUrl.includes('quote-api.jup.ag') ? 'https://api.jup.ag/swap/v1' : (configuredJupiterUrl || 'https://api.jup.ag/swap/v1');
+const rpcUrl = process.env.HELIUS_RPC_URL
+  || process.env.SOLANA_RPC_URL
+  || 'https://api.mainnet-beta.solana.com';
+if (!rpcUrl) throw new Error('Missing RPC URL: يجب توفير HELIUS_RPC_URL');
 
 module.exports = {
   token: process.env.TELEGRAM_BOT_TOKEN,
-  rpcUrl: process.env.SOLANA_RPC_URL,
+  rpcUrl,
   encryptionKey,
   masterPrivateKey,
   walletSource,

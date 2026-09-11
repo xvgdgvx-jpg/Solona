@@ -82,6 +82,11 @@ app.get('/helius-status', (_req, res) => {
         hasRpcUrl: !!process.env.HELIUS_RPC_URL,
         hasWsUrl: !!process.env.HELIUS_WS_URL,
       },
+      rpc: {
+        hasHeliusRpcUrl: !!process.env.HELIUS_RPC_URL,
+        hasSolanaRpcUrl: !!process.env.SOLANA_RPC_URL,
+        activeRpc: process.env.HELIUS_RPC_URL ? 'HELIUS_RPC_URL' : process.env.SOLANA_RPC_URL ? 'SOLANA_RPC_URL' : 'default',
+      },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
