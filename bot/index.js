@@ -18,6 +18,17 @@ setInterval(() => {
 }, 60 * 1000);
 
 const bot = new Bot(config.token);
+let botStarted = false;
+const originalStart = bot.start.bind(bot);
+bot.start = (...args) => {
+  if (botStarted) {
+    console.warn('[bot] start() called twice — ignoring');
+    return Promise.resolve();
+  }
+  botStarted = true;
+  return originalStart(...args);
+};
+Object.defineProperty(bot, 'botStarted', { enumerable: true, get: () => botStarted });
 const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
 const publicMenu = () => new InlineKeyboard().text('حالة المراقب', 'public:status').row().text('شرح البوت', 'public:help');
 const controlMenu = (enabled, paperEnabled) => new InlineKeyboard().text('تشغيل المراقب', 'watcher:on').text('إيقاف المراقب', 'watcher:off').row().text(paperEnabled ? 'إيقاف شراء/بيع تجريبي' : 'تشغيل شراء/بيع تجريبي', paperEnabled ? 'paper:off' : 'paper:on').row().text('تحديث الحالة', 'watcher:status');

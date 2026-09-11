@@ -1,6 +1,7 @@
 const express = require('express');
 const https = require('https');
 const http = require('http');
+const os = require('os');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -24,6 +25,20 @@ app.get('/health', (_req, res) => res.status(200).json({
 }));
 
 app.get('/', (_req, res) => res.status(200).send('Bot is running'));
+
+app.get('/whoami', (_req, res) => {
+  let botStarted = false;
+  try {
+    const bot = require('./bot');
+    botStarted = Boolean(bot.botStarted);
+  } catch (_) {}
+  res.json({
+    pid: process.pid,
+    hostname: os.hostname(),
+    startTime: global.START_TIME,
+    botStarted,
+  });
+});
 
 app.get('/ping', (_req, res) => {
   console.log(`[ping] Local ping at ${new Date().toISOString()}`);
