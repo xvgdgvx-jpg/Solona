@@ -10,6 +10,12 @@ const { startHealthServer } = require('../health-server');
 startHealthServer();
 process.on('uncaughtException', (error) => console.error('[uncaughtException]', error.stack || error.message));
 process.on('unhandledRejection', (error) => console.error('[unhandledRejection]', error?.stack || error));
+setInterval(() => {
+  global.LAST_ACTIVITY = new Date().toISOString();
+  const uptime = process.uptime();
+  const mem = process.memoryUsage();
+  console.log(`[heartbeat] Uptime: ${Math.floor(uptime)}s | RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | ${global.LAST_ACTIVITY}`);
+}, 60 * 1000);
 
 const bot = new Bot(config.token);
 const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
