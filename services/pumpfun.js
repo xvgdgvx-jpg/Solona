@@ -243,6 +243,9 @@ class PumpFunWatcher {
       buyVolumeUsd: Number(coin.buy_volume ?? coin.buy_volume_usd ?? 0),
       sellVolumeUsd: Number(coin.sell_volume ?? coin.sell_volume_usd ?? 0),
       uniqueBuyers: Number(coin.unique_buyers ?? coin.buyers ?? 0),
+      uniqueSellers: Number(coin.unique_sellers ?? coin.sellers ?? 0),
+      previousCurveProgress: Number(coin.previous_curve_progress ?? 0) || null,
+      creatorSold: coin.creator_sold ?? null,
       bondingCurveProgress,
       bondingCurveProgressSource: progressSource,
       virtualSolReserves: virtualSol,
@@ -339,6 +342,35 @@ class PumpFunWatcher {
     if (ageSec > 0) {
       if (minAge > 0 && ageSec < minAge) return `عمر ${ageSec.toFixed(0)}ث أقل من ${minAge}ث`;
       if (maxAge > 0 && ageSec > maxAge) return `عمر ${ageSec.toFixed(0)}ث أكبر من ${maxAge}ث`;
+    }
+
+    if (s.rugProtectionEnabled) {
+      if (candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0) {
+        const total = candidate.buyVolumeUsd + candidate.sellVolumeUsd;
+        const sellRatio = candidate.sellVolumeUsd / total;
+        if (sellRatio > 0.70 && total > 100) {
+          return `🚨 بيع كثيف: ${(sellRatio * 100).toFixed(0)}% من الحجم`;
+        }
+      }
+
+      if (candidate.liquiditySol > 0 && candidate.liquiditySol < 20) {
+        return `🚨 سيولة منخفضة: ${candidate.liquiditySol.toFixed(1)} SOL`;
+      }
+
+      if (candidate.uniqueBuyers > 0 && candidate.uniqueSellers > 0 && candidate.uniqueSellers > candidate.uniqueBuyers * 2) {
+        return `🚨 بائعون (${candidate.uniqueSellers}) أكثر من مشترين (${candidate.uniqueBuyers})`;
+      }
+
+      if (candidate.previousCurveProgress != null && candidate.bondingCurveProgress != null) {
+        const drop = candidate.previousCurveProgress - candidate.bondingCurveProgress;
+        if (drop >= 15) {
+          return `🚨 هبوط المنحنى ${drop.toFixed(1)}% — dump محتمل`;
+        }
+      }
+
+      if (candidate.heliusVerified && candidate.creatorSold === true) {
+        return '🚨 المطور باع حصته';
+      }
     }
 
     return null;

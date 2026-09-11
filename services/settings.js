@@ -23,6 +23,7 @@ const defaults = {
   capitalProtectionSellPct: 50,
   capitalProtectionTriggerPct: 10,
   maxHoldTimeMin: 0,
+  rugProtectionEnabled: true,
 
   // ── التداول الحقيقي ──
   liveTrading: false,
