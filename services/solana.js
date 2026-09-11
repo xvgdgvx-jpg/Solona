@@ -107,6 +107,22 @@ async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, pri
   }
 }
 
+async function getSolBalance({ rpcUrl, owner }) {
+  const publicKey = owner instanceof PublicKey ? owner : new PublicKey(owner);
+  return (await connection(rpcUrl).getBalance(publicKey, 'confirmed')) / 1e9;
+}
+
+async function checkSolReceived({ rpcUrl, signature, beforeSol, owner }) {
+  const conn = connection(rpcUrl);
+  const tx = await conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 });
+  if (!tx) throw new Error('لم يتم تأكيد المعاملة.');
+  if (tx.meta?.err) throw new Error(`فشلت المعاملة على السلسلة: ${JSON.stringify(tx.meta.err)}`);
+  const afterSol = await getSolBalance({ rpcUrl, owner });
+  const received = afterSol - Number(beforeSol);
+  if (!Number.isFinite(received) || received <= 0) throw new Error('لم يتم رصد SOL مستلم بعد البيع.');
+  return received;
+}
+
 async function getPortfolio({ rpcUrl, secret }) {
   const wallet = keypairFromSecret(secret);
   try {
@@ -119,4 +135,4 @@ async function getPortfolio({ rpcUrl, secret }) {
   }
 }
 
-module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio };
+module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, getTokenBalance, executeSwap, getSolBalance, checkSolReceived, getPortfolio };

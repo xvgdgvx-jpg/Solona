@@ -32,6 +32,7 @@ const panelKeyboard = (s) => new InlineKeyboard()
   .text('🔄 تحديث', 'panel:refresh').row()
   .text(s.paperTradingEnabled ? '🚫 إيقاف الشراء' : '✅ تشغيل الشراء', 'panel:buyoff')
   .text(s.autoSellEnabled ? '🛑 إيقاف البيع' : '💰 تشغيل البيع', `panel:${s.autoSellEnabled ? 'selloff' : 'sellon'}`).row()
+  .text(s.killSwitch ? '▶️ إلغاء القاطع' : '🛑 قاطع الطوارئ', `panel:${s.killSwitch ? 'killoff' : 'killon'}`).row()
   .text('⚙️ الإعدادات', 'panel:settings').text('📋 التفاصيل', 'panel:details').row()
   .text('🔄 إعادة ضبط الرصيد', 'balance:confirm');
 const settingsKeyboard = () => new InlineKeyboard().text('حجم الصفقة', 'cfg:allocation').row().text('عدد الصفقات اليومية', 'cfg:daily').row().text('هدف الربح والبيع', 'cfg:profit').row().text('نمط حجم الصفقة', 'cfg:sizing').row().text('⚙️ تعديل الفلاتر', 'filters').row().text('تأكيد البدء', 'cfg:confirm').text('رجوع', 'panel:back');
@@ -127,8 +128,10 @@ async function flushPanelEdit(key) { const entry = panelEditQueue.get(key); if (
 function updatePanel(s = settingsForAdmin()) { const chatId = String(s.paperPanelChatId || config.adminId); const messageId = s.paperPanelMessageId; if (!messageId) return Promise.resolve(); const key = `${chatId}:${messageId}`; const entry = panelEditQueue.get(key) || { pending: null, running: false, timer: null }; entry.pending = { chatId, messageId, text: panelText(s), keyboard: panelKeyboard(s) }; panelEditQueue.set(key, entry); clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 500); return Promise.resolve(); }
 async function recordPaperSale(value, sold, reason, triggerType = 'Manual') {
   const s = settingsForAdmin();
-  s.paperAvailableSol = Number(s.paperAvailableSol || 0) + Number(sold.currentSol || 0);
-  s.paperPnlSol = Number(s.paperPnlSol || 0) + Number(sold.pnlSol || 0);
+  if (value.mode !== 'live') {
+    s.paperAvailableSol = Number(s.paperAvailableSol || 0) + Number(sold.currentSol || 0);
+    s.paperPnlSol = Number(s.paperPnlSol || 0) + Number(sold.pnlSol || 0);
+  }
   let autoType = triggerType;
   if (reason.includes('وقف خسارة')) autoType = 'وقف خسارة'; else if (reason.includes('الربح النهائي')) autoType = 'هدف ثاني'; else if (reason.includes('الربح الأول')) autoType = 'هدف أول'; else if (reason.includes('Trailing')) autoType = 'تراجع'; else if (reason.includes('حماية رأس المال')) autoType = 'حماية'; else if (reason.includes('بيع زمني')) autoType = 'زمني'; else if (reason.includes('يدوي')) autoType = 'يدوي';
   const holdSec = value.openedAt ? Math.round((Date.now() - new Date(value.openedAt).getTime()) / 1000) : 0;
@@ -204,11 +207,16 @@ async function trade(ctx, side, mintArg, amountArg, fraction = null) {
       }
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.mint === mint && p.status === 'open');
       if (!position) return ctx.reply('لا يوجد مركز Paper Trading مفتوح لهذه العملة.');
-      const closed = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: position.id, fraction: fraction === null ? 1 : fraction, jupiterUrl: config.jupiterUrl });
+      const closed = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: position.id, fraction: fraction === null ? 1 : fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: userSecret() });
       return ctx.reply(`تمت محاكاة البيع بنسبة ${Math.round((fraction || 1) * 100)}٪\nالقيمة: ${closed.currentSol.toFixed(6)} SOL\nالربح/الخسارة: ${closed.pnlSol >= 0 ? '+' : ''}${closed.pnlSol.toFixed(6)} SOL (${closed.pnlPct.toFixed(2)}٪)\nلم تُرسل أي معاملة.`);
     }
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s), priorityFeeMaxLamports: config.priorityFeeMaxLamports });
-    s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+    if (!result.signature && effectiveLiveTrading(s)) throw new Error('لم تُرجع المعاملة توقيعاً.');
+    if (side === 'buy' && effectiveLiveTrading(s)) {
+      const actualBalance = await getTokenBalance({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint });
+      await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint, investedSol: amount, quote: { ...quote, outAmount: actualBalance.raw }, mode: 'live', buySignature: result.signature, metadata: { name: mint, symbol: 'N/A', decimals: actualBalance.decimals } });
+    }
+    s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
     if (result.simulated) return ctx.reply(`معاينة ${action} — الوضع التجريبي\nلم تُرسل معاملة.`, { reply_markup: tradeMenu(mint) });
     await ctx.reply(`${action} مؤكّد\nالتوقيع: ${result.signature}\n${explorer(result.signature)}`, { reply_markup: tradeMenu(mint) });
   } catch (e) { await ctx.reply(`تعذر تنفيذ ${action}.\n${e.message}`); }
@@ -238,7 +246,7 @@ bot.callbackQuery('fconfirm', async (ctx) => { await ctx.answerCallbackQuery(); 
 bot.callbackQuery('fcancel', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; pendingFilters.delete(String(ctx.from.id)); await ctx.editMessageText(filterText(settingsForAdmin()), { reply_markup: filterKeyboard(settingsForAdmin()) }); });
 bot.callbackQuery('balance:confirm', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; await ctx.editMessageText('⚠️ إعادة ضبط الدورة ستعيد الرصيد، تغلق المراكز التجريبية، وتمسح كل العملات المفحوصة وقائمة المراقبة والإحصاءات وسجل العمليات. هل تريد بدء دورة جديدة؟', { reply_markup: new InlineKeyboard().text('تأكيد دورة جديدة ✅', 'balance:do').row().text('إلغاء 🔙', 'panel:back') }); });
 bot.callbackQuery('balance:do', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const s = settingsForAdmin(); const user = getUser(config.adminId, config.encryptionKey); const positions = getPositions(config.adminId, config.encryptionKey).map((position) => ({ ...position, status: 'closed', updatedAt: Date.now() })); watcher.resetCycle(); s.paperAvailableSol = Number(s.paperCapitalSol || 0); s.paperPnlSol = 0; s.paperEvents = []; s.tradesToday = 0; s.lastMint = null; s.lastFilterResult = 'لم تبدأ الدورة الجديدة بعد'; s.rejectStats = {}; s.checkedCount = 0; s.lastCheckAt = null; saveUser(config.adminId, { ...user, paperPositions: positions, settings: s }, config.encryptionKey); watcher.updateSettings(s); await ctx.editMessageText('✅ تمت إعادة ضبط الرصيد ومسح بيانات الدورة السابقة. تم تجهيز دورة فحص جديدة، ولم تُرسل أي معاملة حقيقية.', { reply_markup: panelKeyboard(s) }); });
-bot.callbackQuery(/^panel:(start|stop|buyoff|sellon|selloff|refresh|settings|details|back)$/, async (ctx) => { if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'للمشرف فقط' }); const action = ctx.match[1]; try { await ctx.answerCallbackQuery({ text: action === 'start' ? 'جارٍ التشغيل...' : 'تم' }); } catch (_) {} const s = settingsForAdmin(); s.paperPanelChatId = String(ctx.callbackQuery.message.chat.id); s.paperPanelMessageId = ctx.callbackQuery.message.message_id; try { if (action === 'start') { watcherManuallyEnabled = true; s.autoSniperEnabled = true; s.paperTradingEnabled = true; s.autoSellEnabled = true; watcher.updateSettings(s); watcher.start(); } if (action === 'stop') { watcherManuallyEnabled = false; s.autoSniperEnabled = false; s.paperTradingEnabled = false; watcher.updateSettings(s); watcher.stop(); } if (action === 'buyoff') s.paperTradingEnabled = false; if (action === 'sellon') s.autoSellEnabled = true; if (action === 'selloff') s.autoSellEnabled = false; saveSettings(config.adminId, s, config.encryptionKey); if (action === 'refresh') return ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); if (action === 'settings') return ctx.editMessageText('ضبط القنص التجريبي\nاختر الإعداد المطلوب:', { reply_markup: settingsKeyboard() }); if (action === 'details') return ctx.editMessageText(detailsText(s), { reply_markup: detailsKeyboard(s) }); if (action === 'back') return ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); await ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); } catch (error) { console.error(`Panel button ${action} error: ${error.stack || error.message}`); try { await ctx.reply(`تعذر تنفيذ الزر حالياً: ${error.message}`); } catch (_) {} } });
+bot.callbackQuery(/^panel:(start|stop|buyoff|sellon|selloff|killon|killoff|refresh|settings|details|back)$/, async (ctx) => { if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'للمشرف فقط' }); const action = ctx.match[1]; try { await ctx.answerCallbackQuery({ text: action === 'start' ? 'جارٍ التشغيل...' : 'تم' }); } catch (_) {} const s = settingsForAdmin(); s.paperPanelChatId = String(ctx.callbackQuery.message.chat.id); s.paperPanelMessageId = ctx.callbackQuery.message.message_id; try { if (action === 'start') { watcherManuallyEnabled = true; s.autoSniperEnabled = true; s.paperTradingEnabled = true; s.autoSellEnabled = true; watcher.updateSettings(s); watcher.start(); } if (action === 'stop') { watcherManuallyEnabled = false; s.autoSniperEnabled = false; s.paperTradingEnabled = false; watcher.updateSettings(s); watcher.stop(); } if (action === 'buyoff') s.paperTradingEnabled = false; if (action === 'sellon') s.autoSellEnabled = true; if (action === 'selloff') s.autoSellEnabled = false; if (action === 'killon') { s.killSwitch = true; watcherManuallyEnabled = false; watcher.stop(); } if (action === 'killoff') { s.killSwitch = false; if (s.autoSniperEnabled) { watcherManuallyEnabled = true; watcher.start(); } } saveSettings(config.adminId, s, config.encryptionKey); if (action === 'refresh') return ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); if (action === 'settings') return ctx.editMessageText('ضبط القنص التجريبي\nاختر الإعداد المطلوب:', { reply_markup: settingsKeyboard() }); if (action === 'details') return ctx.editMessageText(detailsText(s), { reply_markup: detailsKeyboard(s) }); if (action === 'back') return ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); await ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); } catch (error) { console.error(`Panel button ${action} error: ${error.stack || error.message}`); try { await ctx.reply(`تعذر تنفيذ الزر حالياً: ${error.message}`); } catch (_) {} } });
 bot.callbackQuery(/^cfg:(allocation|daily|profit|sizing|confirm)$/, async (ctx) => { try { await ctx.answerCallbackQuery(); } catch (_) {} if (!isAdmin(ctx)) return; const page = ctx.match[1]; if (page === 'allocation') return ctx.editMessageText('اختر نسبة الصفقة من رأس المال الافتراضي 1 SOL:', { reply_markup: allocationKeyboard() }); if (page === 'daily') return ctx.editMessageText('اختر الحد الأقصى للصفقات في اليوم:', { reply_markup: dailyKeyboard() }); if (page === 'profit') return ctx.editMessageText('اختر نسبة الربح التي عندها يتم البيع التلقائي:', { reply_markup: profitKeyboard() }); if (page === 'sizing') return ctx.editMessageText('اختر طريقة حساب رأس المال:', { reply_markup: sizingKeyboard() }); const s = settingsForAdmin(); watcherManuallyEnabled = true; s.autoSniperEnabled = true; s.paperTradingEnabled = true; s.autoSellEnabled = true; s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = ctx.callbackQuery.message.message_id; try { saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); watcher.start(); await ctx.editMessageText(panelText(s), { reply_markup: panelKeyboard(s) }); } catch (error) { console.error(`Start confirmation error: ${error.stack || error.message}`); await ctx.reply(`تعذر تشغيل القنص: ${error.message}`); } });
 bot.callbackQuery(/^set:(allocation|daily|profit|sizing):(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const [, key, value] = ctx.callbackQuery.data.split(':'); const s = settingsForAdmin(); if (key === 'allocation') { s.paperAllocationPct = Number(value); saveSettings(config.adminId, s, config.encryptionKey); return ctx.editMessageText('تم حفظ حجم الصفقة. اختر عدد الصفقات اليومية:', { reply_markup: dailyKeyboard() }); } if (key === 'daily') { s.maxTradesPerDay = Number(value); saveSettings(config.adminId, s, config.encryptionKey); return ctx.editMessageText('تم حفظ الحد اليومي. اختر هدف الربح والبيع:', { reply_markup: profitKeyboard() }); } if (key === 'profit') { s.paperTakeProfitPct = Number(value); saveSettings(config.adminId, s, config.encryptionKey); return ctx.editMessageText('تم حفظ هدف الربح. اختر نمط حجم الصفقة:', { reply_markup: sizingKeyboard() }); } s.paperSizingMode = value; saveSettings(config.adminId, s, config.encryptionKey); await ctx.editMessageText('تم حفظ نمط الصفقة. اضغط تأكيد البدء للانطلاق.', { reply_markup: settingsKeyboard() }); });
 bot.callbackQuery(/^watcher:(on|off|status)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const action = ctx.callbackQuery.data.split(':')[1]; const s = settingsForAdmin(); if (action === 'on') { watcherManuallyEnabled = true; s.autoSniperEnabled = true; watcher.updateSettings(s); watcher.start(); } if (action === 'off') { watcherManuallyEnabled = false; s.autoSniperEnabled = false; watcher.updateSettings(s); watcher.stop(); } s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = ctx.callbackQuery.message.message_id; saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s); });
@@ -246,13 +254,15 @@ bot.callbackQuery(/^paper:(on|off)$/, async (ctx) => { await ctx.answerCallbackQ
 bot.callbackQuery(/^toggle:(sniper|live)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const [, key] = ctx.callbackQuery.data.split(':'); const s = settingsForAdmin(); if (key === 'sniper') { s.autoSniperEnabled = !s.autoSniperEnabled; watcherManuallyEnabled = s.autoSniperEnabled; } else s.liveTrading = !s.liveTrading; saveSettings(config.adminId, s, config.encryptionKey); watcher.updateSettings(s); if (key === 'sniper' && s.autoSniperEnabled) watcher.start(); else if (key === 'sniper') watcher.stop(); await ctx.reply(settingsText(s)); });
 bot.callbackQuery(/^(b|s):([^:]+):(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); const [, action, token, value] = ctx.callbackQuery.data.split(':'); const mint = tradeTokens.get(token); if (!mint) return ctx.reply('انتهت صلاحية هذا الزر. استخدم /pnl أو أعد طلب العملة.'); const side = action === 'b' ? 'buy' : 'sell'; await trade(ctx, side, mint, side === 'buy' ? value : null, side === 'sell' ? Number(value) : null); });
 bot.callbackQuery(/^p:(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا الزر متاح للمشرف فقط.'); if (!paperTokens.has(ctx.match[1])) return ctx.reply('انتهت صلاحية هذا الزر. استخدم /pnl من جديد.'); await sendPnl(ctx); });
-bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const id = paperTokens.get(ctx.match[1]); const fraction = Number(ctx.match[2]); if (!id) return updatePanel(settingsForAdmin(), ctx); try { const value = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === id); const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: id, fraction, jupiterUrl: config.jupiterUrl }); if (value) await recordPaperSale(value, result, `بيع يدوي ${fraction * 100}٪`); } catch (error) { console.error(`Paper sale error: ${error.message}`); await updatePanel(settingsForAdmin(), ctx); } });
+bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const id = paperTokens.get(ctx.match[1]); const fraction = Number(ctx.match[2]); if (!id) return updatePanel(settingsForAdmin(), ctx); try { const value = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === id); const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: id, fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: userSecret() }); if (value) await recordPaperSale(value, result, `بيع يدوي ${fraction * 100}٪`); } catch (error) { console.error(`Paper sale error: ${error.message}`); await updatePanel(settingsForAdmin(), ctx); } });
 
 let lastSniperErrorAt = 0;
 let paperMonitorBusy = false;
 let watcherManuallyEnabled = false;
 const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onFilter: (candidate, reason) => { const s = settingsForAdmin(); s.lastFilterResult = `${candidate.symbol || candidate.mint}: مرفوض — ${reason}`; s.rejectStats = s.rejectStats || {}; const cleanReason = reason.replace(/—.*$/, '').trim(); const key = cleanReason.length > 40 ? cleanReason.slice(0, 40) + '…' : cleanReason; s.rejectStats[key] = (s.rejectStats[key] || 0) + 1; s.checkedCount = (s.checkedCount || 0) + 1; s.lastCheckAt = new Date().toISOString(); saveSettings(config.adminId, s, config.encryptionKey); updatePanel(s); }, onCandidate: async (candidate) => {
   const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
+  const safetyBlock = await checkSafetyRails(s);
+  if (safetyBlock) { console.log(safetyBlock); return; }
   if (!s.autoSniperEnabled) return;
   if (!canTrade(s)) return;
   if (!s.paperTradingEnabled && !effectiveLiveTrading(s)) return;
@@ -262,17 +272,21 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(amountSol * 1e9), slippageBps: 100 });
     if (!effectiveLiveTrading(s)) {
       await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: candidate.mint, outputMint: SOL_MINT, amountLamports: Number(quote.outAmount), slippageBps: 100 });
-      const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote, metadata: candidate });
-      s.paperAvailableSol = Number(s.paperAvailableSol) - amountSol; s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
+      const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote, mode: 'paper', buySignature: null, metadata: candidate });
+      s.paperAvailableSol = Number(s.paperAvailableSol) - amountSol; s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
       const tokenAmount = Number(quote.outAmount) / (10 ** Number(candidate.decimals ?? 6)); const unitPrice = amountSol / tokenAmount; const ageSec = candidate.createdAt ? Math.round(Date.now() / 1000 - Number(candidate.createdAt)) : 0; s.paperEvents = [...(s.paperEvents || []), { type: 'شراء', name: `${candidate.name} (${candidate.symbol})`, mint: candidate.mint, detail: `${amountSol.toFixed(4)} SOL | ${tokenAmount.toLocaleString()} Token`, metadata: { amountSol: Number(amountSol), tokenAmount, unitPrice, liquiditySol: Number(candidate.liquiditySol || 0), marketCapUsd: Number(candidate.marketCapUsd || 0), volumeUsd: Number(candidate.volumeUsd || 0), uniqueBuyers: Number(candidate.uniqueBuyers || 0), bondingCurveProgress: Number(candidate.bondingCurveProgress || 0), bondingCurveSource: candidate.bondingCurveProgressSource || '—', ageSeconds: ageSec, socialLinks: candidate.socialLinks?.length || 0, mintAuthority: candidate.mintAuthority ? 'موجود' : 'معطل', freezeAuthority: candidate.freezeAuthority ? 'موجود' : 'معطل', filtersAtBuy: { curveRange: `${s.minCurveProgress}-${s.maxCurveProgress}%`, minVolume: `$${s.minVolumeUsd}`, minBuyers: s.minUniqueBuyers, maxDev: `≤${s.maxCreatorHoldingsPct}%`, maxTop: `≤${s.maxTopHoldersPct}%`, minLiquidity: `${s.minLiquiditySol} SOL`, ageRange: `${s.minTokenAgeSec}-${s.maxTokenAgeSec}ث`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'حر', social: s.requireSocialLinks ? 'إلزامي' : 'حر' } }, timestamp: Date.now() }].slice(-20);
       saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
       return;
     }
-    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s), priorityFeeMaxLamports: config.priorityFeeMaxLamports });
-    s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
-    const status = result.simulated ? 'معاينة تجريبية — لم تُرسل معاملة' : `تم التنفيذ\n${explorer(result.signature)}`;
+    const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: true, priorityFeeMaxLamports: config.priorityFeeMaxLamports });
+    if (!result.signature) throw new Error('لم تُرجع المعاملة توقيعاً.');
+    const actualBalance = await getTokenBalance({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint: candidate.mint });
+    const livePosition = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote: { ...quote, outAmount: actualBalance.raw }, mode: 'live', buySignature: result.signature, metadata: candidate });
+    if (!livePosition) throw new Error('تعذر فتح سجل المركز الحي.');
+    s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
+    const status = `تم التنفيذ\n${explorer(result.signature)}`;
     console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
-  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
+  } catch (error) { const now = Date.now(); s.consecutiveFailures = (s.consecutiveFailures || 0) + 1; saveSettings(config.adminId, s, config.encryptionKey); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
 }});
 setInterval(() => {
   const s = settingsForAdmin();
@@ -285,18 +299,50 @@ setInterval(() => {
 let monitorErrorsCount = 0;
 let monitorBackoffOnce = false;
 let monitorQueued = false;
+async function checkSafetyRails(s) {
+  if (s.killSwitch) return '🛑 قاطع الطوارئ مفعّل';
+  const today = new Date().toISOString().slice(0, 10);
+  if (s.dailyLossResetDay !== today) {
+    s.dailyLossResetDay = today;
+    s.dailyLossStartSol = Number(s.paperAvailableSol || 0);
+    saveSettings(config.adminId, s, config.encryptionKey);
+  }
+  if (Number(s.dailyLossLimitSol) > 0 && s.dailyLossStartSol !== null) {
+    const loss = Number(s.dailyLossStartSol) - Number(s.paperAvailableSol || 0);
+    if (loss >= Number(s.dailyLossLimitSol)) return `🛑 تم الوصول لحد الخسارة اليومي (${loss.toFixed(4)} SOL)`;
+  }
+  if (Number(s.maxConsecutiveFailures) > 0 && Number(s.consecutiveFailures || 0) >= Number(s.maxConsecutiveFailures)) {
+    return `🛑 توقف بسبب ${s.consecutiveFailures} أخطاء متتالية`;
+  }
+  return null;
+}
+
+function resetConsecutiveFailures(s) {
+  if (s.consecutiveFailures) { s.consecutiveFailures = 0; saveSettings(config.adminId, s, config.encryptionKey); }
+}
+
 async function monitorPaperPositions() {
   const startTime = Date.now();
   if (paperMonitorBusy) { monitorQueued = true; return; }
   const s = settingsForAdmin();
-  if (effectiveLiveTrading(s) || !s.autoSellEnabled) return;
+  if (!s.autoSellEnabled) return;
   if (monitorBackoffOnce) { monitorBackoffOnce = false; return; }
   paperMonitorBusy = true;
   try {
     const { values } = await refreshPositionsCached({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
     monitorErrorsCount = 0;
     await Promise.all(values.map(async (value) => {
-      if (value.pricingError) return;
+      if (value.pricingError) {
+        s.consecutiveFailures = (s.consecutiveFailures || 0) + 1;
+        saveSettings(config.adminId, s, config.encryptionKey);
+        if (s.consecutiveFailures >= Number(s.maxConsecutiveFailures || 5)) {
+          s.killSwitch = true;
+          watcherManuallyEnabled = false;
+          watcher.stop();
+          console.error('🛑 تم تفعيل قاطع الطوارئ بعد أخطاء التسعير');
+        }
+        return;
+      }
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
       if (!position || position.status !== 'open') return;
       const stopLoss = Number(s.paperStopLossPct || 15);
@@ -340,15 +386,16 @@ async function monitorPaperPositions() {
       const positionBeforeClose = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
       if (!positionBeforeClose || positionBeforeClose.status !== 'open') return;
       try {
-        const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction, jupiterUrl: config.jupiterUrl });
+        const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: userSecret() });
         if (!sold) return;
+        resetConsecutiveFailures(s);
         if (capitalProtection) {
           const user = getUser(config.adminId, config.encryptionKey);
           const updatedPositions = (user.paperPositions || []).map((p) => p.id === value.id ? { ...p, capitalProtectionTriggered: true } : p);
           saveUser(config.adminId, { ...user, paperPositions: updatedPositions }, config.encryptionKey);
         }
         await recordPaperSale(value, sold, reason, triggerType);
-      } catch (error) { console.error(`Close error ${value.id}: ${error.message}`); }
+      } catch (error) { s.consecutiveFailures = (s.consecutiveFailures || 0) + 1; saveSettings(config.adminId, s, config.encryptionKey); console.error(`Close error ${value.id}: ${error.message}`); if (s.consecutiveFailures >= Number(s.maxConsecutiveFailures || 5)) { s.killSwitch = true; watcherManuallyEnabled = false; watcher.stop(); console.error('🛑 تم تفعيل قاطع الطوارئ'); } }
     }));
   } catch (error) {
     monitorErrorsCount += 1;

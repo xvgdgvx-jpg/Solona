@@ -25,6 +25,14 @@ const defaults = {
   maxHoldTimeMin: 0,
   rugProtectionEnabled: true,
 
+  // ── حدود الحماية ──
+  dailyLossLimitSol: 0,
+  dailyLossStartSol: null,
+  dailyLossResetDay: null,
+  maxConsecutiveFailures: 5,
+  consecutiveFailures: 0,
+  killSwitch: false,
+
   // ── التداول الحقيقي ──
   liveTrading: false,
   tradeSizeSol: 0.1,

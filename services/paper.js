@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { getQuote, SOL_MINT } = require('./solana');
+const { getQuote, getTokenBalance, executeSwap, checkSolReceived, SOL_MINT, keypairFromSecret } = require('./solana');
 const { getUser, saveUser } = require('./storage');
 
 const getPositions = (adminId, key) => getUser(adminId, key).paperPositions || [];
@@ -12,35 +12,66 @@ const SOL_USD_CACHE_MS = 60000;
 
 async function solUsd() {
   const now = Date.now();
-  if (solUsdCache.value !== null && now - solUsdCache.timestamp < SOL_USD_CACHE_MS) {
-    return solUsdCache.value;
-  }
+  if (solUsdCache.value !== null && now - solUsdCache.timestamp < SOL_USD_CACHE_MS) return solUsdCache.value;
   try {
-    const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
-      params: { ids: 'solana', vs_currencies: 'usd' },
-      timeout: 5000,
-    });
+    const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 });
     const value = Number(data?.solana?.usd);
-    if (Number.isFinite(value) && value > 0) {
-      solUsdCache = { value, timestamp: now };
-      return value;
-    }
+    if (Number.isFinite(value) && value > 0) { solUsdCache = { value, timestamp: now }; return value; }
     return solUsdCache.value;
   } catch (error) {
     console.warn(`[solUsd] CoinGecko error: ${error.message} — استخدام آخر قيمة معروفة`);
     return solUsdCache.value;
   }
 }
-async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote, metadata = {} }) {
+
+async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote, metadata = {}, mode = 'paper', buySignature = null }) {
   const positions = getPositions(adminId, key);
   const outAmount = Number(quote.outAmount);
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
+  const decimals = Number(metadata.decimals ?? 6);
+  const tokenAmount = outAmount / (10 ** decimals);
   const existing = positions.find((p) => p.mint === mint && p.status === 'open');
-  if (existing) { existing.investedSol += investedSol; existing.tokenAmountRaw += outAmount; existing.tokenAmount = existing.tokenAmountRaw / (10 ** existing.decimals); existing.entryPriceSol = existing.investedSol / existing.tokenAmount; existing.updatedAt = Date.now(); }
-  else positions.push({ id: `${mint}:${Date.now()}`, mint, name: metadata.name || 'بدون اسم', symbol: metadata.symbol || 'N/A', liquiditySol: Number(metadata.liquiditySol || 0), marketCapUsd: Number(metadata.marketCapUsd || 0), investedSol, tokenAmountRaw: outAmount, tokenAmount: outAmount / (10 ** Number(metadata.decimals ?? 6)), decimals: Number(metadata.decimals ?? 6), entryPriceSol: investedSol / (outAmount / (10 ** Number(metadata.decimals ?? 6))), tp1Sold: false, highestPnlPct: null, entryQuote: quote, openedAt: Date.now(), updatedAt: Date.now(), status: 'open' });
+  if (existing) {
+    existing.investedSol += investedSol;
+    existing.tokenAmountRaw += outAmount;
+    existing.tokenAmount = existing.tokenAmountRaw / (10 ** existing.decimals);
+    existing.entryPriceSol = existing.investedSol / existing.tokenAmount;
+    existing.updatedAt = Date.now();
+    existing.mode = existing.mode || mode;
+    if (buySignature) existing.buySignature = buySignature;
+    existing.entryMetadata = { ...(existing.entryMetadata || {}), ...metadata };
+  } else {
+    positions.push({
+      id: `${mint}:${Date.now()}`,
+      mint,
+      name: metadata.name || 'بدون اسم',
+      symbol: metadata.symbol || 'N/A',
+      mode,
+      investedSol,
+      tokenAmountRaw: outAmount,
+      tokenAmount,
+      decimals,
+      entryPriceSol: investedSol / tokenAmount,
+      entryQuote: quote,
+      buySignature,
+      sellSignatures: [],
+      tp1Sold: false,
+      highestPnlPct: null,
+      openedAt: Date.now(),
+      updatedAt: Date.now(),
+      status: 'open',
+      capitalProtectionTriggered: false,
+      consecutivePricingErrors: 0,
+      lastPricingAt: null,
+      entryMetadata: { ...metadata },
+      liquiditySol: Number(metadata.liquiditySol || 0),
+      marketCapUsd: Number(metadata.marketCapUsd || 0),
+    });
+  }
   savePositions(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }
+
 async function refreshSinglePosition({ jupiterUrl, position }) {
   try {
     const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: position.tokenAmountRaw, slippageBps: 100 });
@@ -50,6 +81,7 @@ async function refreshSinglePosition({ jupiterUrl, position }) {
     return { ...position, currentSol: null, pnlSol: null, pnlPct: null, quote: null, pricingError: error.message };
   }
 }
+
 async function refreshPositions({ adminId, key, jupiterUrl }) {
   const positions = getPositions(adminId, key).filter((p) => p.status === 'open');
   const values = await Promise.all(positions.map((position) => refreshSinglePosition({ jupiterUrl, position })));
@@ -59,6 +91,8 @@ async function refreshPositions({ adminId, key, jupiterUrl }) {
     const position = positions.find((p) => p.id === value.id);
     if (position && value.pnlPct > Number(position.highestPnlPct ?? -Infinity)) {
       position.highestPnlPct = value.pnlPct;
+      position.consecutivePricingErrors = 0;
+      position.lastPricingAt = Date.now();
       position.updatedAt = Date.now();
       highestChanged = true;
     }
@@ -67,6 +101,7 @@ async function refreshPositions({ adminId, key, jupiterUrl }) {
   const usd = await solUsd();
   return { values, solUsd: usd };
 }
+
 async function refreshPositionsCached(params) {
   const now = Date.now();
   if (priceCache.data && now - priceCache.timestamp < PRICE_CACHE_MS) return priceCache.data;
@@ -74,25 +109,69 @@ async function refreshPositionsCached(params) {
   priceCache = { data: result, timestamp: now };
   return result;
 }
-async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUrl }) {
+
+async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUrl, rpcUrl, ownerSecret }) {
   const positions = getPositions(adminId, key);
   const position = positions.find((p) => p.id === positionId && p.status === 'open');
   if (!position) return null;
-  if (position.status !== 'open') return null;
   position.status = 'closing';
   position.updatedAt = Date.now();
   savePositions(adminId, positions, key);
-  const value = await refreshSinglePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
-  if (value.pricingError) {
-    position.status = 'open';
+  try {
+    if (position.mode === 'live') {
+      if (!rpcUrl || !ownerSecret) throw new Error('إعدادات RPC أو المحفظة غير متوفرة لإغلاق المركز الحي.');
+      const wallet = keypairFromSecret(ownerSecret);
+      const balance = await getTokenBalance({ rpcUrl, ownerSecret, mint: position.mint });
+      const requested = Math.floor(position.tokenAmountRaw * fraction);
+      if (balance.raw < requested) throw new Error('الرصيد الفعلي أقل من الكمية المطلوبة.');
+      const amountToSell = Math.floor(balance.raw * fraction);
+      const beforeSol = await getSolBalance({ rpcUrl, owner: wallet.publicKey.toBase58() });
+      const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: amountToSell, slippageBps: 100 });
+      const swapResult = await executeSwap({ rpcUrl, jupiterUrl, secret: ownerSecret, quote, liveTrading: true });
+      if (!swapResult.signature) throw new Error('لم تُرجع المعاملة توقيعاً.');
+      const currentSol = await checkSolReceived({ rpcUrl, signature: swapResult.signature, beforeSol, owner: wallet.publicKey.toBase58() });
+      const investedPart = position.investedSol * fraction;
+      const pnlSol = currentSol - investedPart;
+      const pnlPct = investedPart ? (pnlSol / investedPart) * 100 : 0;
+      position.sellSignatures = [...(position.sellSignatures || []), swapResult.signature];
+      position.lastPricingAt = Date.now();
+      position.consecutivePricingErrors = 0;
+      if (fraction >= 1) position.status = 'closed';
+      else {
+        position.tokenAmountRaw -= amountToSell;
+        position.tokenAmount = position.tokenAmountRaw / (10 ** position.decimals);
+        position.investedSol -= investedPart;
+        position.tp1Sold = true;
+        position.status = 'open';
+      }
+      position.updatedAt = Date.now();
+      savePositions(adminId, positions, key);
+      return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature };
+    }
+
+    const value = await refreshSinglePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
+    if (value.pricingError) throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
+    if (fraction >= 1) position.status = 'closed';
+    else {
+      position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction);
+      position.tokenAmount = position.tokenAmountRaw / (10 ** position.decimals);
+      position.investedSol -= position.investedSol * fraction;
+      position.tp1Sold = true;
+      position.status = 'open';
+    }
+    position.consecutivePricingErrors = 0;
+    position.lastPricingAt = Date.now();
     position.updatedAt = Date.now();
     savePositions(adminId, positions, key);
-    throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
+    return { ...value, fraction };
+  } catch (error) {
+    position.status = 'open';
+    position.consecutivePricingErrors = (position.consecutivePricingErrors || 0) + 1;
+    position.lastPricingAt = Date.now();
+    position.updatedAt = Date.now();
+    savePositions(adminId, positions, key);
+    throw error;
   }
-  if (fraction >= 1) position.status = 'closed';
-  else { position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction); position.investedSol -= position.investedSol * fraction; position.tp1Sold = true; position.status = 'open'; }
-  position.updatedAt = Date.now();
-  savePositions(adminId, positions, key);
-  return { ...value, fraction };
 }
+
 module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions };
