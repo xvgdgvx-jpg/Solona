@@ -12,6 +12,7 @@ global.START_TIME = global.START_TIME || null;
 global.LAST_ACTIVITY = global.LAST_ACTIVITY || null;
 
 // تحديث آخر نشاط قبل معالجة كل طلب HTTP.
+app.use(express.json());
 app.use((req, _res, next) => {
   global.LAST_ACTIVITY = new Date().toISOString();
   next();
@@ -140,4 +141,4 @@ function startHealthServer() {
   return server;
 }
 
-module.exports = { startHealthServer };
+module.exports = { startHealthServer, app };

@@ -80,8 +80,8 @@ const startBot = async () => {
       botReady = false;
       lastBotError = error.description || error.message;
       if (isConflict(error)) {
-        console.error(conflictMessage);
-        shutdown('TELEGRAM_CONFLICT', 1);
+        console.warn(`${conflictMessage} — انتظار 30 ثانية ثم إعادة المحاولة`);
+        retryTimer = setTimeout(startBot, 30000);
         return;
       }
       console.error(`Telegram polling stopped; retrying in ${retryDelayMs / 1000}s: ${lastBotError}`);
@@ -92,8 +92,8 @@ const startBot = async () => {
     botReady = false;
     lastBotError = error.description || error.message;
     if (isConflict(error)) {
-      console.error(conflictMessage);
-      shutdown('TELEGRAM_CONFLICT', 1);
+      console.warn(`${conflictMessage} — انتظار 30 ثانية ثم إعادة المحاولة`);
+      retryTimer = setTimeout(startBot, 30000);
       return;
     }
     console.error(`Telegram startup failed; retrying in ${retryDelayMs / 1000}s: ${lastBotError}`);

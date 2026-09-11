@@ -1,11 +1,11 @@
-const { Bot, InlineKeyboard } = require('grammy');
+const { Bot, InlineKeyboard, webhookCallback } = require('grammy');
 const config = require('../config');
 const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, SOL_MINT, keypairFromSecret } = require('../services/solana');
 const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
 const { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions } = require('../services/paper');
 const { getUser, saveUser, resetSettings } = require('../services/storage');
-const { startHealthServer } = require('../health-server');
+const { startHealthServer, app } = require('../health-server');
 
 startHealthServer();
 process.on('uncaughtException', (error) => console.error('[uncaughtException]', error.stack || error.message));
@@ -20,13 +20,40 @@ setInterval(() => {
 const bot = new Bot(config.token);
 let botStarted = false;
 const originalStart = bot.start.bind(bot);
+const IS_PRODUCTION = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+const webhookPath = `/webhook/${config.token}`;
+let webhookSetupPromise = null;
+let webhookMounted = false;
+const configureWebhook = async () => {
+  if (webhookSetupPromise) return webhookSetupPromise;
+  webhookSetupPromise = (async () => {
+    if (!process.env.RENDER_EXTERNAL_URL) throw new Error('RENDER_EXTERNAL_URL is required for Telegram webhook mode');
+    if (!webhookMounted) {
+      app.use(webhookPath, webhookCallback(bot, 'express'));
+      webhookMounted = true;
+    }
+    const webhookUrl = `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}${webhookPath}`;
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+    await bot.api.setWebhook(webhookUrl, {
+      drop_pending_updates: true,
+      allowed_updates: ['message', 'callback_query'],
+    });
+    console.log(`[telegram] ✅ Webhook set: ${webhookUrl}`);
+  })().catch((error) => {
+    webhookSetupPromise = null;
+    throw error;
+  });
+  return webhookSetupPromise;
+};
 bot.start = (...args) => {
   if (botStarted) {
     console.warn('[bot] start() called twice — ignoring');
     return Promise.resolve();
   }
   botStarted = true;
-  return originalStart(...args);
+  const result = IS_PRODUCTION ? configureWebhook() : originalStart({ drop_pending_updates: true, ...args[0] });
+  if (result?.catch) result.catch(() => { botStarted = false; });
+  return result;
 };
 Object.defineProperty(bot, 'botStarted', { enumerable: true, get: () => botStarted });
 const menu = () => new InlineKeyboard().text('المحفظة', 'wallet').text('المحفظة الاستثمارية', 'portfolio').row().text('اقتناص Pump.fun', 'snipe').text('الإعدادات', 'settings');
