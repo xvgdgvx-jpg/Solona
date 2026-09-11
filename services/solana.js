@@ -7,6 +7,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const connection = (rpcUrl) => new Connection(rpcUrl, 'confirmed');
 let lastQuoteAt = 0;
+let jupiterBackoffUntil = 0;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function validateSecretBytes(value) {
@@ -40,7 +41,8 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
     if (!inputMint || !outputMint || !PublicKey.isOnCurve(new PublicKey(outputMint).toBytes())) throw new Error('عنوان العملة غير صالح.');
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const wait = Math.max(0, 350 - (Date.now() - lastQuoteAt));
+      const minInterval = Math.max(750, Number(process.env.JUPITER_MIN_INTERVAL_MS || 1200));
+      const wait = Math.max(0, minInterval - (Date.now() - lastQuoteAt), jupiterBackoffUntil - Date.now());
       if (wait) await sleep(wait);
       try {
         lastQuoteAt = Date.now();
@@ -50,7 +52,9 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
         lastError = error;
         if (error.response?.status !== 429 || attempt === 2) break;
         const retryAfter = Number(error.response.headers?.['retry-after'] || 0);
-        await sleep(Math.min(10000, Math.max(1000, retryAfter * 1000 || (attempt + 1) * 1500)));
+        const backoff = Math.min(15000, Math.max(2000, retryAfter * 1000 || (attempt + 1) * 2500));
+        jupiterBackoffUntil = Date.now() + backoff;
+        await sleep(backoff);
       }
     }
     throw lastError;
