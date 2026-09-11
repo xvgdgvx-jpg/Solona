@@ -43,6 +43,13 @@ class PumpFunWatcher {
     this.lastError = `Helius: ${error.message}`;
     this.onError(error);
     this.heliusFailures = (this.heliusFailures || 0) + 1;
+    if (this.running && this.streamMode && error.code === 'HELIUS_CONNECT_TIMEOUT') {
+      this.streamMode = false;
+      this.heliusFailures = 0;
+      try { this.helius.stop(); } catch (_) {}
+      this.loop();
+      return;
+    }
     if (this.running && this.streamMode && this.heliusFailures >= 3) {
       console.log('[helius] Too many failures — falling back to REST polling');
       this.streamMode = false;
@@ -249,13 +256,22 @@ class PumpFunWatcher {
         const v = coin.volume ?? coin.volume_usd ?? coin.usd_volume;
         return v == null ? null : Number(v);
       })(),
-      buyVolumeUsd: Number(coin.buy_volume ?? coin.buy_volume_usd ?? 0),
-      sellVolumeUsd: Number(coin.sell_volume ?? coin.sell_volume_usd ?? 0),
+      buyVolumeUsd: (() => {
+        const v = coin.buy_volume ?? coin.buy_volume_usd;
+        return v == null ? null : Number(v);
+      })(),
+      sellVolumeUsd: (() => {
+        const v = coin.sell_volume ?? coin.sell_volume_usd;
+        return v == null ? null : Number(v);
+      })(),
       uniqueBuyers: (() => {
         const v = coin.unique_buyers ?? coin.buyers ?? coin.uniqueBuyers;
         return v == null ? null : Number(v);
       })(),
-      uniqueSellers: Number(coin.unique_sellers ?? coin.sellers ?? 0),
+      uniqueSellers: (() => {
+        const v = coin.unique_sellers ?? coin.sellers;
+        return v == null ? null : Number(v);
+      })(),
       previousCurveProgress: Number(coin.previous_curve_progress ?? 0) || null,
       creatorSold: coin.creator_sold ?? null,
       bondingCurveProgress,
@@ -306,15 +322,13 @@ class PumpFunWatcher {
 
     const minVol = Number(s.minVolumeUsd ?? 0);
     if (minVol > 0) {
-      const hasVolume = Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd > 0;
-      if (!hasVolume) {
-        if (s.allowZeroVolume) {
-          const minLiqForZero = Number(s.allowZeroVolumeMinLiq ?? 30);
-          if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol < minLiqForZero) {
-            return `📊 حجم غير معروف + سيولة ${candidate.liquiditySol?.toFixed(1) || '?'} < ${minLiqForZero}`;
-          }
-        } else {
+      if (candidate.volumeUsd == null) {
+        if (!s.allowZeroVolume) {
           return '📊 حجم غير معروف — رفض احترازي';
+        }
+        const minLiqForZero = Number(s.allowZeroVolumeMinLiq ?? 30);
+        if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol < minLiqForZero) {
+          return `📊 حجم غير معروف + سيولة ${candidate.liquiditySol?.toFixed(1) || '?'} < ${minLiqForZero}`;
         }
       } else if (candidate.volumeUsd < minVol) {
         return `📊 حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
@@ -323,8 +337,8 @@ class PumpFunWatcher {
 
     const minBuyers = Number(s.minUniqueBuyers ?? 0);
     if (minBuyers > 0) {
-      if (!Number.isFinite(candidate.uniqueBuyers) || candidate.uniqueBuyers <= 0) {
-        return '👥 مشترون غير معروفين — رفض احترازي';
+      if (candidate.uniqueBuyers == null) {
+        return '👥 مشترون غير معروفين — بيانات مفقودة';
       }
       if (candidate.uniqueBuyers < minBuyers) {
         return `👥 مشترون ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
@@ -342,9 +356,8 @@ class PumpFunWatcher {
     }
 
     if (s.requireBuyVolumeDominance) {
-      if (!Number.isFinite(candidate.buyVolumeUsd) || candidate.buyVolumeUsd <= 0 ||
-          !Number.isFinite(candidate.sellVolumeUsd) || candidate.sellVolumeUsd <= 0) {
-        return '📊 بيانات الشراء/البيع غير معروفة — رفض احترازي';
+      if (candidate.buyVolumeUsd == null || candidate.sellVolumeUsd == null) {
+        return '📊 بيانات الشراء/البيع غير معروفة';
       }
       if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) {
         return `📊 شراء $${candidate.buyVolumeUsd.toFixed(0)} ≤ بيع $${candidate.sellVolumeUsd.toFixed(0)}`;
