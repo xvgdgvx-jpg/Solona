@@ -26,7 +26,7 @@ app.get('/health', (_req, res) => res.status(200).json({
   pid: process.pid,
 }));
 
-app.get('/', (_req, res) => res.status(200).send('Bot is running'));
+app.get('/', (_req, res) => res.status(200).send('Bot is Active'));
 
 app.get('/whoami', (_req, res) => {
   let botStarted = false;
