@@ -399,7 +399,9 @@ class PumpFunWatcher {
           const candidate = this.normalize(coin);
           candidate.source = this.streamMode ? 'helius-watchlist' : 'pumpfun-watchlist';
           if (this.streamMode) {
-            Object.assign(candidate, await this.helius.enrichToken(mint, candidate.creator, candidate.bondingCurve));
+            const enrichment = this.helius.enrichToken(mint, candidate.creator, candidate.bondingCurve);
+            const timeout = new Promise((resolve) => setTimeout(() => resolve({}), 500));
+            Object.assign(candidate, await Promise.race([enrichment, timeout]).catch(() => ({})));
           }
           const reason = this.filterReason(candidate);
           console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=$${candidate.volumeUsd.toFixed(2)} | buyers=${candidate.uniqueBuyers} | result=${reason || 'PASS'}`);

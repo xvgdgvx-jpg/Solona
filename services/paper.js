@@ -20,7 +20,7 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   savePositions(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
 }
-async function valuePosition({ jupiterUrl, position }) {
+async function refreshSinglePosition({ jupiterUrl, position }) {
   try {
     const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: position.tokenAmountRaw, slippageBps: 100 });
     const currentSol = Number(quote.outAmount) / 1e9;
@@ -31,7 +31,7 @@ async function valuePosition({ jupiterUrl, position }) {
 }
 async function refreshPositions({ adminId, key, jupiterUrl }) {
   const positions = getPositions(adminId, key).filter((p) => p.status === 'open');
-  const values = await Promise.all(positions.map((position) => valuePosition({ jupiterUrl, position })));
+  const values = await Promise.all(positions.map((position) => refreshSinglePosition({ jupiterUrl, position })));
   let highestChanged = false;
   for (const value of values) {
     if (!Number.isFinite(value.pnlPct)) continue;
@@ -61,7 +61,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
   position.status = 'closing';
   position.updatedAt = Date.now();
   savePositions(adminId, positions, key);
-  const value = await valuePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
+  const value = await refreshSinglePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
   if (value.pricingError) {
     position.status = 'open';
     position.updatedAt = Date.now();
@@ -74,4 +74,4 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
   savePositions(adminId, positions, key);
   return { ...value, fraction };
 }
-module.exports = { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions };
+module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions };

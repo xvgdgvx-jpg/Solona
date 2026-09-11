@@ -7,8 +7,8 @@ const defaults = {
   autoSellEnabled: true,
 
   // ── رأس المال ──
-  paperCapitalSol: 1,
-  paperAvailableSol: 1,
+  paperCapitalSol: 3,
+  paperAvailableSol: 3,
   paperAllocationPct: 5,
   paperSizingMode: 'isolated',
   paperPanelChatId: null,
@@ -19,6 +19,10 @@ const defaults = {
   paperStopLossPct: 15,
   paperTakeProfitFirstPct: 30,
   paperTakeProfitFinalPct: 60,
+  capitalProtectionEnabled: true,
+  capitalProtectionSellPct: 50,
+  capitalProtectionTriggerPct: 10,
+  maxHoldTimeMin: 0,
 
   // ── التداول الحقيقي ──
   liveTrading: false,
