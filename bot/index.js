@@ -471,10 +471,15 @@ setInterval(() => {
   for (const [key, value] of Object.entries(rejectBuf)) s.rejectStats[key] = (s.rejectStats[key] || 0) + value;
   s.checkedCount = (s.checkedCount || 0) + checkedBuf;
   s.lastCheckAt = new Date().toISOString();
-  saveSettings(config.adminId, s, config.encryptionKey)
-    .then(() => updatePanel(s))
-    .catch((error) => console.error(`[stats] حفظ إحصاءات الرفض فشل: ${error.message}`))
-    .finally(() => { _rejectFlushRunning = false; });
+  try {
+    saveSettings(config.adminId, s, config.encryptionKey);
+    updatePanel(s)
+      .catch((error) => console.error(`[stats] تحديث اللوحة فشل: ${error.message}`))
+      .finally(() => { _rejectFlushRunning = false; });
+  } catch (error) {
+    console.error(`[stats] حفظ إحصاءات الرفض فشل: ${error.message}`);
+    _rejectFlushRunning = false;
+  }
 }, 10000);
 setInterval(() => {
   cleanupStaleClosing(config.adminId, config.encryptionKey).catch((error) => console.error(`[cleanup] ${error.message}`));
