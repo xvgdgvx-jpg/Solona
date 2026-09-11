@@ -38,7 +38,7 @@ const configureWebhook = async () => {
       drop_pending_updates: true,
       allowed_updates: ['message', 'callback_query'],
     });
-    console.log(`[telegram] ✅ Webhook set: ${webhookUrl}`);
+    console.log('[telegram] ✅ Webhook set (path hidden)');
   })().catch((error) => {
     webhookSetupPromise = null;
     throw error;
