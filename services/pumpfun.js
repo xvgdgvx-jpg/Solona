@@ -229,20 +229,32 @@ class PumpFunWatcher {
     }
 
     const virtualSol = Number(coin.virtual_sol_reserves ?? coin.virtualSolReserves ?? 0);
-    const liquiditySol = Number(coin.liquidity_sol ?? coin.sol_reserves ?? 0)
-      || (virtualSol > 0 ? virtualSol / 1e9 : 0);
 
     return {
       mint: coin.mint || coin.address,
       name: coin.name || '',
       symbol: coin.symbol || 'N/A',
       decimals: Number(coin.decimals ?? 6),
-      marketCapUsd: Number(coin.market_cap ?? coin.usd_market_cap ?? 0),
-      liquiditySol,
-      volumeUsd: Number(coin.volume ?? coin.volume_usd ?? coin.usd_volume ?? 0),
+      marketCapUsd: (() => {
+        const v = coin.market_cap ?? coin.usd_market_cap;
+        return v == null ? null : Number(v);
+      })(),
+      liquiditySol: (() => {
+        const v = coin.liquidity_sol ?? coin.sol_reserves;
+        if (v != null) return Number(v);
+        const virtual = Number(coin.virtual_sol_reserves ?? coin.virtualSolReserves ?? 0);
+        return virtual > 0 ? virtual / 1e9 : null;
+      })(),
+      volumeUsd: (() => {
+        const v = coin.volume ?? coin.volume_usd ?? coin.usd_volume;
+        return v == null ? null : Number(v);
+      })(),
       buyVolumeUsd: Number(coin.buy_volume ?? coin.buy_volume_usd ?? 0),
       sellVolumeUsd: Number(coin.sell_volume ?? coin.sell_volume_usd ?? 0),
-      uniqueBuyers: Number(coin.unique_buyers ?? coin.buyers ?? 0),
+      uniqueBuyers: (() => {
+        const v = coin.unique_buyers ?? coin.buyers ?? coin.uniqueBuyers;
+        return v == null ? null : Number(v);
+      })(),
       uniqueSellers: Number(coin.unique_sellers ?? coin.sellers ?? 0),
       previousCurveProgress: Number(coin.previous_curve_progress ?? 0) || null,
       creatorSold: coin.creator_sold ?? null,
@@ -293,13 +305,23 @@ class PumpFunWatcher {
     }
 
     const minVol = Number(s.minVolumeUsd ?? 0);
-    if (minVol > 0 && candidate.volumeUsd > 0 && candidate.volumeUsd < minVol) {
-      return `حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
+    if (minVol > 0) {
+      if (!Number.isFinite(candidate.volumeUsd) || candidate.volumeUsd <= 0) {
+        return '📊 حجم غير معروف — رفض احترازي';
+      }
+      if (candidate.volumeUsd < minVol) {
+        return `📊 حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
+      }
     }
 
     const minBuyers = Number(s.minUniqueBuyers ?? 0);
-    if (minBuyers > 0 && candidate.uniqueBuyers > 0 && candidate.uniqueBuyers < minBuyers) {
-      return `مشترون ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
+    if (minBuyers > 0) {
+      if (!Number.isFinite(candidate.uniqueBuyers) || candidate.uniqueBuyers <= 0) {
+        return '👥 مشترون غير معروفين — رفض احترازي';
+      }
+      if (candidate.uniqueBuyers < minBuyers) {
+        return `👥 مشترون ${candidate.uniqueBuyers} أقل من ${minBuyers}`;
+      }
     }
 
     const maxDev = Number(s.maxCreatorHoldingsPct ?? 0);
@@ -312,25 +334,37 @@ class PumpFunWatcher {
       return `حيازة كبار الملاك ${candidate.topHoldersPct}% تتجاوز ${maxTop}%`;
     }
 
-    if (s.requireBuyVolumeDominance && candidate.buyVolumeUsd > 0 && candidate.sellVolumeUsd > 0) {
+    if (s.requireBuyVolumeDominance) {
+      if (!Number.isFinite(candidate.buyVolumeUsd) || candidate.buyVolumeUsd <= 0 ||
+          !Number.isFinite(candidate.sellVolumeUsd) || candidate.sellVolumeUsd <= 0) {
+        return '📊 بيانات الشراء/البيع غير معروفة — رفض احترازي';
+      }
       if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) {
-        return 'حجم الشراء ليس أكبر من البيع';
+        return `📊 شراء $${candidate.buyVolumeUsd.toFixed(0)} ≤ بيع $${candidate.sellVolumeUsd.toFixed(0)}`;
       }
     }
 
     const minLiq = Number(s.minLiquiditySol ?? 0);
-    if (minLiq > 0 && candidate.liquiditySol > 0 && candidate.liquiditySol < minLiq) {
-      return `سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
+    if (minLiq > 0) {
+      if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol <= 0) {
+        return '💧 سيولة غير معروفة — رفض احترازي';
+      }
+      if (candidate.liquiditySol < minLiq) {
+        return `💧 سيولة ${candidate.liquiditySol.toFixed(2)} SOL أقل من ${minLiq}`;
+      }
     }
 
     const minMcap = Number(s.minMarketCapUsd ?? 0);
     const maxMcap = Number(s.maxMarketCapUsd ?? 0);
-    if (candidate.marketCapUsd > 0) {
+    if (minMcap > 0 || maxMcap > 0) {
+      if (!Number.isFinite(candidate.marketCapUsd) || candidate.marketCapUsd <= 0) {
+        return '🎯 قيمة سوقية غير معروفة — رفض احترازي';
+      }
       if (minMcap > 0 && candidate.marketCapUsd < minMcap) {
-        return `MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
+        return `🎯 MC $${candidate.marketCapUsd.toFixed(0)} أقل من $${minMcap}`;
       }
       if (maxMcap > 0 && candidate.marketCapUsd > maxMcap) {
-        return `MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
+        return `🎯 MC $${candidate.marketCapUsd.toFixed(0)} أعلى من $${maxMcap}`;
       }
     }
 
@@ -436,7 +470,8 @@ class PumpFunWatcher {
             Object.assign(candidate, await Promise.race([enrichment, timeout]).catch(() => ({})));
           }
           const reason = this.filterReason(candidate);
-          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=$${candidate.volumeUsd.toFixed(2)} | buyers=${candidate.uniqueBuyers} | result=${reason || 'PASS'}`);
+          const volumeText = Number.isFinite(candidate.volumeUsd) ? `$${candidate.volumeUsd.toFixed(2)}` : 'unknown';
+          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=${volumeText} | buyers=${candidate.uniqueBuyers ?? 'unknown'} | result=${reason || 'PASS'}`);
           await this.evaluate(candidate);
         } catch (error) {
           this.lastError = `إعادة فحص: ${error.message}`;

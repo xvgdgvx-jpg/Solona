@@ -32,21 +32,21 @@ const defaults = {
   tradesToday: 0,
   tradeDay: new Date().toISOString().slice(0, 10),
 
-  // ── الفلاتر (كلها معطلة افتراضياً — المستخدم يختار) ──
-  minCurveProgress: 0,
-  maxCurveProgress: 0,
-  minVolumeUsd: 0,
-  minUniqueBuyers: 0,
+  // ── الفلاتر ──
+  minCurveProgress: 2,
+  maxCurveProgress: 35,
+  minVolumeUsd: 500,
+  minUniqueBuyers: 5,
   maxCreatorHoldingsPct: 0,
   maxTopHoldersPct: 0,
   requireSocialLinks: false,
   requireRenouncedAuthorities: false,
-  requireBuyVolumeDominance: false,
-  minLiquiditySol: 0,
-  maxMarketCapUsd: 0,
-  minMarketCapUsd: 0,
-  minTokenAgeSec: 0,
-  maxTokenAgeSec: 0,
+  requireBuyVolumeDominance: true,
+  minLiquiditySol: 25,
+  maxMarketCapUsd: 30000,
+  minMarketCapUsd: 3000,
+  minTokenAgeSec: 60,
+  maxTokenAgeSec: 600,
   watchlistMinutes: 10,
 
   // ── الحالة ──

@@ -93,7 +93,7 @@ function detailsText(s) {
     if (isBuy) return [
       `${icon} #${i + 1} شراء — ${e.name || '—'}`, `🔗 ${shortAddress(e.mint)}`,
       `💵 المبلغ: ${Number(m.amountSol || 0).toFixed(4)} SOL`, `💧 السيولة: ${Number(m.liquiditySol || 0).toFixed(2)} SOL`,
-      `🎯 MC: $${Number(m.marketCapUsd || 0).toFixed(0)}`, `📊 الحجم: $${Number(m.volumeUsd || 0).toFixed(0)} | المشترون: ${m.uniqueBuyers || 0}`,
+      `🎯 MC: $${Number(m.marketCapUsd || 0).toFixed(0)}`, `📊 الحجم: ${m.volumeUsd == null ? 'غير معروف ❌' : '$' + m.volumeUsd.toFixed(0)} | المشترون: ${m.uniqueBuyers == null ? 'غير معروف ❌' : m.uniqueBuyers}`,
       `📉 المنحنى: ${Number(m.bondingCurveProgress || 0).toFixed(1)}%`, `⏱️ العمر: ${m.ageSeconds || 0}ث`,
       `🔒 العقد: ${m.mintAuthority || '—'} | ${m.freezeAuthority || '—'}`,
       `✅ الفلاتر: ${m.filtersAtBuy?.curveRange || '—'} | ${m.filtersAtBuy?.minVolume || '—'} | ${m.filtersAtBuy?.minBuyers || 0} مشتري`,
