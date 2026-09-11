@@ -346,6 +346,15 @@ setInterval(() => {
   const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).getTime() : Date.now();
   if (!status.streamMode && Date.now() - lastPoll > 120000) { console.log('[watchdog] Watcher stalled > 2min — restarting'); watcher.stop(); setTimeout(() => watcher.start(), 2000); }
 }, 60000);
+// Restore the persisted watcher state after a process restart. Trading remains
+// paper-only unless LIVE_TRADING=true and live mode is explicitly enabled.
+const bootSettings = settingsForAdmin();
+if (bootSettings.autoSniperEnabled && !bootSettings.killSwitch) {
+  watcherManuallyEnabled = true;
+  watcher.updateSettings(bootSettings);
+  watcher.start();
+  console.log('[startup] Watcher restored from persisted settings');
+}
 let monitorErrorsCount = 0;
 let monitorBackoffOnce = false;
 let monitorQueued = false;
@@ -461,7 +470,9 @@ async function monitorPaperPositions() {
     if (cycleMs > 500) console.warn(`[monitor] دورة بطيئة: ${cycleMs}ms`);
   }
 }
-setInterval(monitorPaperPositions, 1000);
+const paperMonitorIntervalMs = Math.max(2000, Number(process.env.PAPER_MONITOR_INTERVAL_MS || 5000));
+setInterval(monitorPaperPositions, paperMonitorIntervalMs);
+console.log(`[monitor] Paper position checks every ${paperMonitorIntervalMs}ms`);
 let _rejectFlushRunning = false;
 setInterval(() => {
   if (!_checkedBuf || _rejectFlushRunning) return;
