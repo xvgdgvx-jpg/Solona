@@ -7,21 +7,39 @@ const savePositions = (adminId, positions, key) => { const user = getUser(adminI
 let priceCache = { data: null, timestamp: 0 };
 const PRICE_CACHE_MS = 50;
 
-let solUsdCache = { value: null, timestamp: 0 };
+let solUsdCache = { value: null, timestamp: 0, inFlight: null };
 const SOL_USD_CACHE_MS = 60000;
+const SOL_USD_STALE_MS = 300000;
 
 async function solUsd() {
   const now = Date.now();
   if (solUsdCache.value !== null && now - solUsdCache.timestamp < SOL_USD_CACHE_MS) return solUsdCache.value;
-  try {
-    const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 });
-    const value = Number(data?.solana?.usd);
-    if (Number.isFinite(value) && value > 0) { solUsdCache = { value, timestamp: now }; return value; }
-    return solUsdCache.value;
-  } catch (error) {
-    console.warn(`[solUsd] CoinGecko error: ${error.message} — استخدام آخر قيمة معروفة`);
-    return solUsdCache.value;
-  }
+  if (solUsdCache.inFlight) return solUsdCache.inFlight;
+
+  solUsdCache.inFlight = (async () => {
+    try {
+      const { data } = await axios.get('https://api.coingecko.com/api/v3/simple/price', { params: { ids: 'solana', vs_currencies: 'usd' }, timeout: 5000 });
+      const value = Number(data?.solana?.usd);
+      if (Number.isFinite(value) && value > 0) {
+        solUsdCache.value = value;
+        solUsdCache.timestamp = Date.now();
+        return value;
+      }
+      return solUsdCache.value;
+    } catch (error) {
+      const code = error.response?.status;
+      if (code === 429) {
+        if (solUsdCache.value !== null) return solUsdCache.value;
+      } else {
+        console.warn(`[solUsd] error: ${error.message}`);
+      }
+      return solUsdCache.value;
+    } finally {
+      solUsdCache.inFlight = null;
+    }
+  })();
+
+  return solUsdCache.inFlight;
 }
 
 async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote, metadata = {}, mode = 'paper', buySignature = null }) {
