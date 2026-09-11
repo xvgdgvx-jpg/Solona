@@ -36,6 +36,8 @@ const defaults = {
   minCurveProgress: 2,
   maxCurveProgress: 35,
   minVolumeUsd: 500,
+  allowZeroVolume: false,
+  allowZeroVolumeMinLiq: 30,
   minUniqueBuyers: 5,
   maxCreatorHoldingsPct: 0,
   maxTopHoldersPct: 0,

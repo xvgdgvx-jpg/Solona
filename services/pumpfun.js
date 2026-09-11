@@ -306,10 +306,17 @@ class PumpFunWatcher {
 
     const minVol = Number(s.minVolumeUsd ?? 0);
     if (minVol > 0) {
-      if (!Number.isFinite(candidate.volumeUsd) || candidate.volumeUsd <= 0) {
-        return '📊 حجم غير معروف — رفض احترازي';
-      }
-      if (candidate.volumeUsd < minVol) {
+      const hasVolume = Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd > 0;
+      if (!hasVolume) {
+        if (s.allowZeroVolume) {
+          const minLiqForZero = Number(s.allowZeroVolumeMinLiq ?? 30);
+          if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol < minLiqForZero) {
+            return `📊 حجم غير معروف + سيولة ${candidate.liquiditySol?.toFixed(1) || '?'} < ${minLiqForZero}`;
+          }
+        } else {
+          return '📊 حجم غير معروف — رفض احترازي';
+        }
+      } else if (candidate.volumeUsd < minVol) {
         return `📊 حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
       }
     }
