@@ -171,7 +171,8 @@ function retryAfterMs(error) { const seconds = Number(error?.parameters?.retry_a
 async function flushPanelEdit(key) { const entry = panelEditQueue.get(key); if (!entry || entry.running || !entry.pending) return; entry.running = true; const pending = entry.pending; entry.pending = null; try { await bot.api.editMessageText(pending.chatId, pending.messageId, pending.text, { reply_markup: pending.keyboard }); } catch (error) { if (error?.error_code === 429 || error?.response?.status === 429) { entry.pending = pending; await new Promise((resolve) => setTimeout(resolve, retryAfterMs(error))); } else if (!String(error.message || '').includes('message is not modified')) console.error(`Panel update error: ${error.message}`); } finally { entry.running = false; if (entry.pending) { clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 3000); } } }
 function updatePanel(s = settingsForAdmin()) { const chatId = String(s.paperPanelChatId || config.adminId); const messageId = s.paperPanelMessageId; if (!messageId) return Promise.resolve(); const key = `${chatId}:${messageId}`; const entry = panelEditQueue.get(key) || { pending: null, running: false, timer: null }; entry.pending = { chatId, messageId, text: panelText(s), keyboard: panelKeyboard(s) }; panelEditQueue.set(key, entry); clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 3000); return Promise.resolve(); }
 async function recordPaperSale(value, sold, reason, triggerType = 'Manual') {
-  const s = settingsForAdmin();
+  const currentSettings = settingsForAdmin();
+  const s = currentSettings;
   if (value.mode !== 'live') {
     s.paperAvailableSol = Number(s.paperAvailableSol || 0) + Number(sold.currentSol || 0);
     s.paperPnlSol = Number(s.paperPnlSol || 0) + Number(sold.pnlSol || 0);
@@ -306,7 +307,7 @@ let watcherManuallyEnabled = false;
 let _rejectBuf = {};
 let _checkedBuf = 0;
 const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settingsForAdmin(), onError: (e) => console.error(`Pump.fun watcher error: ${e.message}`), onFilter: (_candidate, reason) => { const key = reason.replace(/—.*$/, '').trim().slice(0, 40); _rejectBuf[key] = (_rejectBuf[key] || 0) + 1; _checkedBuf += 1; }, onCandidate: async (candidate) => {
-  const s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
+  let s = settingsForAdmin(); s.lastMint = candidate.mint; saveSettings(config.adminId, s, config.encryptionKey);
   const safetyBlock = await checkSafetyRails(s);
   if (safetyBlock) { console.log(safetyBlock); return; }
   if (!s.autoSniperEnabled) return;
@@ -318,6 +319,8 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     const quote = await getQuote({ jupiterUrl: config.jupiterUrl, outputMint: candidate.mint, amountLamports: Math.round(amountSol * 1e9), slippageBps: 100 });
     if (!effectiveLiveTrading(s)) {
       await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: candidate.mint, outputMint: SOL_MINT, amountLamports: Number(quote.outAmount), slippageBps: 100 });
+      s = settingsForAdmin();
+      if (Number(s.paperAvailableSol) < amountSol) return;
       const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote, mode: 'paper', buySignature: null, metadata: candidate });
       s.paperAvailableSol = Number(s.paperAvailableSol) - amountSol; s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
       const tokenAmount = Number(quote.outAmount) / (10 ** Number(candidate.decimals ?? 6)); const unitPrice = amountSol / tokenAmount; const ageSec = candidate.createdAt ? Math.round(Date.now() / 1000 - Number(candidate.createdAt)) : 0; s.paperEvents = [...(s.paperEvents || []), { type: 'شراء', name: `${candidate.name} (${candidate.symbol})`, mint: candidate.mint, detail: `${amountSol.toFixed(4)} SOL | ${tokenAmount.toLocaleString()} Token`, metadata: { amountSol: Number(amountSol), tokenAmount, unitPrice, liquiditySol: Number(candidate.liquiditySol || 0), marketCapUsd: Number(candidate.marketCapUsd || 0), volumeUsd: Number(candidate.volumeUsd || 0), uniqueBuyers: Number(candidate.uniqueBuyers || 0), bondingCurveProgress: Number(candidate.bondingCurveProgress || 0), bondingCurveSource: candidate.bondingCurveProgressSource || '—', ageSeconds: ageSec, socialLinks: candidate.socialLinks?.length || 0, mintAuthority: candidate.mintAuthority ? 'موجود' : 'معطل', freezeAuthority: candidate.freezeAuthority ? 'موجود' : 'معطل', filtersAtBuy: { curveRange: `${s.minCurveProgress}-${s.maxCurveProgress}%`, minVolume: `$${s.minVolumeUsd}`, minBuyers: s.minUniqueBuyers, maxDev: `≤${s.maxCreatorHoldingsPct}%`, maxTop: `≤${s.maxTopHoldersPct}%`, minLiquidity: `${s.minLiquiditySol} SOL`, ageRange: `${s.minTokenAgeSec}-${s.maxTokenAgeSec}ث`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'حر', social: s.requireSocialLinks ? 'إلزامي' : 'حر' } }, timestamp: Date.now() }].slice(-20);
@@ -327,6 +330,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: true, priorityFeeMaxLamports: config.priorityFeeMaxLamports });
     if (!result.signature) throw new Error('لم تُرجع المعاملة توقيعاً.');
     const actualBalance = await getTokenBalance({ rpcUrl: config.rpcUrl, ownerSecret: userSecret(), mint: candidate.mint });
+    s = settingsForAdmin();
     const livePosition = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote: { ...quote, outAmount: actualBalance.raw }, mode: 'live', buySignature: result.signature, metadata: candidate });
     if (!livePosition) throw new Error('تعذر فتح سجل المركز الحي.');
     s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
@@ -457,7 +461,7 @@ async function monitorPaperPositions() {
     if (cycleMs > 500) console.warn(`[monitor] دورة بطيئة: ${cycleMs}ms`);
   }
 }
-setInterval(monitorPaperPositions, 500);
+setInterval(monitorPaperPositions, 1000);
 let _rejectFlushRunning = false;
 setInterval(() => {
   if (!_checkedBuf || _rejectFlushRunning) return;

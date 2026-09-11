@@ -169,46 +169,57 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
       const swapResult = await executeSwap({ rpcUrl, jupiterUrl, secret: ownerSecret, quote, liveTrading: true });
       if (!swapResult.signature) throw new Error('لم تُرجع المعاملة توقيعاً.');
       const currentSol = await checkSolReceived({ rpcUrl, signature: swapResult.signature, beforeSol, owner: wallet.publicKey.toBase58() });
-      const investedPart = position.investedSol * fraction;
+      const currentPositions = getPositions(adminId, key);
+      const currentPosition = currentPositions.find((p) => p.id === positionId && p.status === 'closing');
+      if (!currentPosition) throw new Error('تعذر العثور على المركز المحدّث بعد تنفيذ البيع.');
+      const investedPart = currentPosition.investedSol * fraction;
       const pnlSol = currentSol - investedPart;
       const pnlPct = investedPart ? (pnlSol / investedPart) * 100 : 0;
-      position.sellSignatures = [...(position.sellSignatures || []), swapResult.signature];
-      position.lastPricingAt = Date.now();
-      position.consecutivePricingErrors = 0;
-      if (fraction >= 1) position.status = 'closed';
+      currentPosition.sellSignatures = [...(currentPosition.sellSignatures || []), swapResult.signature];
+      currentPosition.lastPricingAt = Date.now();
+      currentPosition.consecutivePricingErrors = 0;
+      if (fraction >= 1) currentPosition.status = 'closed';
       else {
-        position.tokenAmountRaw -= amountToSell;
-        position.tokenAmount = position.tokenAmountRaw / (10 ** position.decimals);
-        position.investedSol -= investedPart;
-        position.tp1Sold = true;
-        position.status = 'open';
+        currentPosition.tokenAmountRaw -= amountToSell;
+        currentPosition.tokenAmount = currentPosition.tokenAmountRaw / (10 ** currentPosition.decimals);
+        currentPosition.investedSol -= investedPart;
+        currentPosition.tp1Sold = true;
+        currentPosition.status = 'open';
       }
-      position.updatedAt = Date.now();
-      savePositionsUnlocked(adminId, positions, key);
+      currentPosition.updatedAt = Date.now();
+      savePositionsUnlocked(adminId, currentPositions, key);
       return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature };
     }
 
     const value = await refreshSinglePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });
     if (value.pricingError) throw new Error(`لا يمكن محاكاة البيع الآن: ${value.pricingError}`);
-    if (fraction >= 1) position.status = 'closed';
+    const currentPositions = getPositions(adminId, key);
+    const currentPosition = currentPositions.find((p) => p.id === positionId && p.status === 'closing');
+    if (!currentPosition) throw new Error('تعذر العثور على المركز المحدّث بعد تسعير البيع.');
+    if (fraction >= 1) currentPosition.status = 'closed';
     else {
-      position.tokenAmountRaw -= Math.floor(position.tokenAmountRaw * fraction);
-      position.tokenAmount = position.tokenAmountRaw / (10 ** position.decimals);
-      position.investedSol -= position.investedSol * fraction;
-      position.tp1Sold = true;
-      position.status = 'open';
+      const soldRaw = Math.floor(currentPosition.tokenAmountRaw * fraction);
+      currentPosition.tokenAmountRaw -= soldRaw;
+      currentPosition.tokenAmount = currentPosition.tokenAmountRaw / (10 ** currentPosition.decimals);
+      currentPosition.investedSol -= currentPosition.investedSol * fraction;
+      currentPosition.tp1Sold = true;
+      currentPosition.status = 'open';
     }
-    position.consecutivePricingErrors = 0;
-    position.lastPricingAt = Date.now();
-    position.updatedAt = Date.now();
-    savePositionsUnlocked(adminId, positions, key);
+    currentPosition.consecutivePricingErrors = 0;
+    currentPosition.lastPricingAt = Date.now();
+    currentPosition.updatedAt = Date.now();
+    savePositionsUnlocked(adminId, currentPositions, key);
     return { ...value, fraction };
   } catch (error) {
-    position.status = 'open';
-    position.consecutivePricingErrors = (position.consecutivePricingErrors || 0) + 1;
-    position.lastPricingAt = Date.now();
-    position.updatedAt = Date.now();
-    savePositionsUnlocked(adminId, positions, key);
+    const currentPositions = getPositions(adminId, key);
+    const currentPosition = currentPositions.find((p) => p.id === positionId && p.status === 'closing');
+    if (currentPosition) {
+      currentPosition.status = 'open';
+      currentPosition.consecutivePricingErrors = (currentPosition.consecutivePricingErrors || 0) + 1;
+      currentPosition.lastPricingAt = Date.now();
+      currentPosition.updatedAt = Date.now();
+      savePositionsUnlocked(adminId, currentPositions, key);
+    }
     throw error;
   }
   });
