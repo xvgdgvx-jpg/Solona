@@ -27,7 +27,13 @@ const shortAddress = (value) => value ? `${String(value).slice(0, 6)}…${String
 const copyAddressKeyboard = (label, value) => new InlineKeyboard().copyText(label, value);
 const settingsForAdmin = () => getSettings(config.adminId, config.encryptionKey);
 const effectiveLiveTrading = (settings) => Boolean(config.liveTrading && settings.liveTrading);
-const panelKeyboard = (s) => new InlineKeyboard().text(s.autoSniperEnabled ? 'إيقاف القنص والشراء' : 'تشغيل القنص تلقائياً', `panel:${s.autoSniperEnabled ? 'stop' : 'start'}`).row().text('ضبط الإعدادات', 'panel:settings').text('تحديث', 'panel:refresh').row().text('تفاصيل العمليات', 'panel:details').row().text(s.autoSellEnabled ? 'إيقاف البيع التلقائي' : 'تشغيل البيع التلقائي', `panel:${s.autoSellEnabled ? 'selloff' : 'sellon'}`).row().text('إعادة ضبط الرصيد', 'balance:confirm').row().text('إيقاف الشراء فقط', 'panel:buyoff');
+const panelKeyboard = (s) => new InlineKeyboard()
+  .text(s.autoSniperEnabled ? '⏹ إيقاف' : '▶️ تشغيل', `panel:${s.autoSniperEnabled ? 'stop' : 'start'}`)
+  .text('🔄 تحديث', 'panel:refresh').row()
+  .text(s.paperTradingEnabled ? '🚫 إيقاف الشراء' : '✅ تشغيل الشراء', 'panel:buyoff')
+  .text(s.autoSellEnabled ? '🛑 إيقاف البيع' : '💰 تشغيل البيع', `panel:${s.autoSellEnabled ? 'selloff' : 'sellon'}`).row()
+  .text('⚙️ الإعدادات', 'panel:settings').text('📋 التفاصيل', 'panel:details').row()
+  .text('🔄 إعادة ضبط الرصيد', 'balance:confirm');
 const settingsKeyboard = () => new InlineKeyboard().text('حجم الصفقة', 'cfg:allocation').row().text('عدد الصفقات اليومية', 'cfg:daily').row().text('هدف الربح والبيع', 'cfg:profit').row().text('نمط حجم الصفقة', 'cfg:sizing').row().text('⚙️ تعديل الفلاتر', 'filters').row().text('تأكيد البدء', 'cfg:confirm').text('رجوع', 'panel:back');
 const pendingFilters = new Map();
 const filterLabels = { curve: '📉 نسبة المنحنى', ageMin: '⏱️ عمر العملة الأدنى', ageMax: '📅 عمر العملة الأقصى', volume: '💵 الحد الأدنى للحجم', buyers: '👥 الحد الأدنى للمشترين', dev: '👨‍💻 أقصى نسبة للمطور', top: '🐋 كبار الملاك', social: '🔗 روابط التواصل', authorities: '🔒 تأمين العقد والسيولة', liquidity: '💧 الحد الأدنى لسيولة SOL', dominance: '📊 تفوق الشراء على البيع', mcapMin: '🎯 الحد الأدنى للقيمة السوقية', marketcap: '🎯 سقف القيمة السوقية', watch: '⏱️ مدة المراقبة', sl: '🛑 وقف الخسارة', rugProtection: '🚨 حماية من الـ Rug', capitalProtection: '🛡️ حماية رأس المال', maxHoldTime: '⏰ البيع الزمني' };
@@ -46,16 +52,81 @@ const allocationKeyboard = () => new InlineKeyboard()
 const dailyKeyboard = () => new InlineKeyboard().text('مفتوح', 'set:daily:0').text('5', 'set:daily:5').text('10', 'set:daily:10').text('50', 'set:daily:50').row().text('رجوع', 'cfg:allocation');
 const profitKeyboard = () => new InlineKeyboard().text('5٪', 'set:profit:5').text('10٪', 'set:profit:10').text('25٪', 'set:profit:25').row().text('50٪', 'set:profit:50').text('75٪', 'set:profit:75').text('100٪', 'set:profit:100').row().text('رجوع', 'cfg:daily');
 const sizingKeyboard = () => new InlineKeyboard().text('صفقة معزولة', 'set:sizing:isolated').row().text('شراء موسّع', 'set:sizing:expanded').row().text('رجوع', 'cfg:profit');
-function panelText(s) { const events = (s.paperEvents || []).slice(-5).reverse(); const eventText = events.length ? events.map((e) => `${e.type}: ${e.name || e.mint} — ${e.detail}`).join('\n') : 'لا توجد عمليات بعد'; const openPositions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open'); const reserved = openPositions.reduce((sum, p) => sum + Number(p.investedSol || 0), 0); return `لوحة القنص التجريبي\n\nالحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'}\nالشراء التجريبي: ${s.paperTradingEnabled ? 'مفعّل' : 'متوقف'}\nالبيع التلقائي عند الهدف: ${s.autoSellEnabled ? 'مفعّل' : 'متوقف'}\nرأس المال الأصلي: ${Number(s.paperCapitalSol).toFixed(4)} SOL\nالرصيد المتاح للشراء: ${Number(s.paperAvailableSol).toFixed(4)} SOL\nالمبلغ المحجوز في المراكز: ${reserved.toFixed(4)} SOL\nالمراكز المفتوحة: ${openPositions.length}\nإجمالي الأرباح المحققة: ${Number(s.paperPnlSol || 0).toFixed(4)} SOL\nهدف البيع الوحيد: ${Number(s.paperTakeProfitPct) > 0 ? `+${s.paperTakeProfitPct}%` : 'غير محدد'}\nالفلاتر: منحنى ${s.minCurveProgress}-${s.maxCurveProgress}% | حجم $${s.minVolumeUsd} | مشترون ${s.minUniqueBuyers}\nالمالك: ≤${s.maxCreatorHoldingsPct}% | كبار الملاك: ≤${s.maxTopHoldersPct}% | روابط: ${s.requireSocialLinks ? 'إلزامية' : 'اختيارية'} | مراقبة: ${s.watchlistMinutes} د\nإحصاءات الفحص: ${s.checkedCount || 0} عملة | آخر فحص: ${s.lastCheckAt || 'لم يبدأ بعد'}\nأسباب الرفض: ${Object.entries(s.rejectStats || {}).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([key, count]) => `${key}: ${count}`).join(' | ') || 'لا توجد'}\nآخر فحص Helius/الفلاتر: ${s.lastFilterResult || 'لا يوجد'}\nالحجم: ${s.paperAllocationPct}% — ${s.paperSizingMode === 'expanded' ? 'موسّع' : 'معزول'}\nالحد اليومي: ${s.maxTradesPerDay || 'مفتوح'}\n\nآخر العمليات:\n${eventText}\n\nالتداول الحقيقي: ${effectiveLiveTrading(s) ? 'مفعّل' : 'متوقف وآمن'}`; }
-function detailsText(s) { const events = (s.paperEvents || []).slice().reverse(); return `تفاصيل عمليات Paper Trading\n\n${events.length ? events.map((e, i) => `${i + 1}. ${e.type}\n${e.name || 'بدون اسم'}\nالعقد: ${shortAddress(e.mint)}\n${e.detail}`).join('\n\n') : 'لا توجد عمليات مسجلة بعد.'}`; }
+function panelText(s) {
+  const events = (s.paperEvents || []).slice(-3).reverse();
+  const openPositions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open');
+  const reserved = openPositions.reduce((sum, p) => sum + Number(p.investedSol || 0), 0);
+  const available = Number(s.paperAvailableSol || 0);
+  const total = Number(s.paperCapitalSol || 0);
+  const pnl = Number(s.paperPnlSol || 0);
+  const pnlSign = pnl > 0 ? '+' : '';
+  const usedPct = total > 0 ? Math.min(100, Math.round((reserved / total) * 100)) : 0;
+  const barLen = 8;
+  const barFilled = Math.round((usedPct / 100) * barLen);
+  const bar = '█'.repeat(barFilled) + '░'.repeat(barLen - barFilled);
+  const eventLines = events.length ? events.map((e) => {
+    const isBuy = e.type === 'شراء';
+    const icon = isBuy ? '🟢' : '🔴';
+    const shortName = (e.name || e.mint || '—').slice(0, 22);
+    const m = e.metadata || {};
+    const extra = isBuy ? `$${Number(m.amountSol || 0).toFixed(2)}` : `${Number(m.pnlPct || 0) >= 0 ? '+' : ''}${Number(m.pnlPct || 0).toFixed(0)}%`;
+    return `${icon} ${shortName} → ${extra}`;
+  }).join('\n') : 'لا توجد عمليات بعد';
+  return [
+    '📊 لوحة القنص', '',
+    `⚡ الحالة: ${s.autoSniperEnabled ? 'يعمل' : 'متوقف'} | ${s.paperTradingEnabled ? 'شراء ✓' : 'شراء ✗'} | ${s.autoSellEnabled ? 'بيع ✓' : 'بيع ✗'}`, '',
+    '💰 رأس المال', `├ الإجمالي: ${total.toFixed(2)} SOL`, `├ المتاح: ${available.toFixed(2)} SOL`, `├ المحجوز: ${reserved.toFixed(2)} SOL`, `├ [${bar}] ${usedPct}%`, `└ صافي الأرباح: ${pnlSign}${pnl.toFixed(4)} SOL`, '',
+    `📈 المراكز المفتوحة: ${openPositions.length}`, '',
+    '🎯 الفلاتر النشطة', `├ منحنى: ${s.minCurveProgress}-${s.maxCurveProgress}%`, `├ حجم: $${s.minVolumeUsd} | مشترون: ${s.minUniqueBuyers}`, `├ مطور: ≤${s.maxCreatorHoldingsPct}% | كبار: ≤${s.maxTopHoldersPct}%`, `├ سيولة: ${s.minLiquiditySol || 'مفتوح'} SOL`, `├ عمر: ${s.minTokenAgeSec || 0}-${s.maxTokenAgeSec || 0}ث`, `└ عقد: ${s.requireRenouncedAuthorities ? 'إلزامي' : 'حر'}`, '',
+    '🛡️ إدارة المخاطر', `├ الهدف: +${s.paperTakeProfitFirstPct}% / +${s.paperTakeProfitFinalPct}%`, `├ وقف الخسارة: -${s.paperStopLossPct}%`, `├ حماية رأس المال: ${s.capitalProtectionEnabled ? `${s.capitalProtectionSellPct}%@-${s.capitalProtectionTriggerPct}%` : 'معطل'}`, `└ بيع زمني: ${s.maxHoldTimeMin > 0 ? `${s.maxHoldTimeMin}د` : 'معطل'}`, '',
+    `📡 الفحص: ${s.checkedCount || 0} عملة | ${s.lastCheckAt ? new Date(s.lastCheckAt).toLocaleTimeString('ar-IQ').slice(0, 5) : '—'}`, '',
+    '📋 آخر 3 عمليات:', eventLines, '', `🛡️ التداول الحقيقي: ${effectiveLiveTrading(s) ? '⚠️ مفعّل' : '✅ متوقف'}`,
+  ].join('\n');
+}
+function detailsText(s) {
+  const events = (s.paperEvents || []).slice().reverse().slice(0, 8);
+  if (!events.length) return '📭 لا توجد عمليات مسجلة بعد.';
+  const lines = events.map((e, i) => {
+    const isBuy = e.type === 'شراء';
+    const m = e.metadata || {};
+    const icon = isBuy ? '🟢' : '🔴';
+    if (isBuy) return [
+      `${icon} #${i + 1} شراء — ${e.name || '—'}`, `🔗 ${shortAddress(e.mint)}`,
+      `💵 المبلغ: ${Number(m.amountSol || 0).toFixed(4)} SOL`, `💧 السيولة: ${Number(m.liquiditySol || 0).toFixed(2)} SOL`,
+      `🎯 MC: $${Number(m.marketCapUsd || 0).toFixed(0)}`, `📊 الحجم: $${Number(m.volumeUsd || 0).toFixed(0)} | المشترون: ${m.uniqueBuyers || 0}`,
+      `📉 المنحنى: ${Number(m.bondingCurveProgress || 0).toFixed(1)}%`, `⏱️ العمر: ${m.ageSeconds || 0}ث`,
+      `🔒 العقد: ${m.mintAuthority || '—'} | ${m.freezeAuthority || '—'}`,
+      `✅ الفلاتر: ${m.filtersAtBuy?.curveRange || '—'} | ${m.filtersAtBuy?.minVolume || '—'} | ${m.filtersAtBuy?.minBuyers || 0} مشتري`,
+    ].join('\n');
+    const mins = Math.floor(Number(m.holdSeconds || 0) / 60); const secs = Number(m.holdSeconds || 0) % 60;
+    const pnl = Number(m.pnlPct || 0); const sign = pnl >= 0 ? '+' : '';
+    return [
+      `${icon} #${i + 1} بيع — ${e.name || '—'}`, `🔗 ${shortAddress(e.mint)}`, `📌 السبب: ${m.reason || e.detail || '—'}`,
+      `📊 النوع: ${m.triggerType || 'Manual'}`, `💰 المستثمر: ${Number(m.investedSol || 0).toFixed(4)} SOL`, `💵 العائد: ${Number(m.currentSol || 0).toFixed(4)} SOL`,
+      `📈 PnL: ${sign}${Number(m.pnlSol || 0).toFixed(4)} SOL (${sign}${pnl.toFixed(1)}%)`, `⏱️ المدة: ${mins}د ${secs}ث`,
+      `⚙️ القيم: SL -${s.paperStopLossPct}% | TP +${s.paperTakeProfitFirstPct}%/+${s.paperTakeProfitFinalPct}%`,
+    ].join('\n');
+  });
+  const result = `📊 سجل العمليات (آخر ${events.length})\n\n${lines.join('\n\n')}`;
+  return result.length > 3900 ? result.slice(0, 3890) + '\n…' : result;
+}
 function detailsKeyboard(s) { const keyboard = new InlineKeyboard(); (s.paperEvents || []).slice().reverse().forEach((e, i) => keyboard.copyText(`نسخ عقد ${i + 1}`, e.mint).row()); return keyboard.text('رجوع', 'panel:back'); }
 const paperTradeAmount = (s) => (Number(s.paperCapitalSol || 1) + (s.paperSizingMode === 'expanded' ? Number(s.paperPnlSol || 0) : 0)) * Number(s.paperAllocationPct || 10) / 100;
 const panelEditQueue = new Map();
 function retryAfterMs(error) { const seconds = Number(error?.parameters?.retry_after || error?.response?.parameters?.retry_after || 1); return Math.min(Math.max(seconds, 1) * 1000, 10000); }
 async function flushPanelEdit(key) { const entry = panelEditQueue.get(key); if (!entry || entry.running || !entry.pending) return; entry.running = true; const pending = entry.pending; entry.pending = null; try { await bot.api.editMessageText(pending.chatId, pending.messageId, pending.text, { reply_markup: pending.keyboard }); } catch (error) { if (error?.error_code === 429 || error?.response?.status === 429) { entry.pending = pending; await new Promise((resolve) => setTimeout(resolve, retryAfterMs(error))); } else if (!String(error.message || '').includes('message is not modified')) console.error(`Panel update error: ${error.message}`); } finally { entry.running = false; if (entry.pending) { clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 500); } } }
 function updatePanel(s = settingsForAdmin()) { const chatId = String(s.paperPanelChatId || config.adminId); const messageId = s.paperPanelMessageId; if (!messageId) return Promise.resolve(); const key = `${chatId}:${messageId}`; const entry = panelEditQueue.get(key) || { pending: null, running: false, timer: null }; entry.pending = { chatId, messageId, text: panelText(s), keyboard: panelKeyboard(s) }; panelEditQueue.set(key, entry); clearTimeout(entry.timer); entry.timer = setTimeout(() => flushPanelEdit(key), 500); return Promise.resolve(); }
-async function recordPaperSale(value, sold, reason) { const s = settingsForAdmin(); s.paperAvailableSol = Number(s.paperAvailableSol || 0) + Number(sold.currentSol || 0); s.paperPnlSol = Number(s.paperPnlSol || 0) + Number(sold.pnlSol || 0); s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${reason} | ${Number(sold.currentSol).toFixed(4)} SOL | ربح/خسارة ${Number(sold.pnlSol).toFixed(4)} SOL (${Number(sold.pnlPct).toFixed(1)}٪)` }].slice(-10); saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s); }
-
+async function recordPaperSale(value, sold, reason, triggerType = 'Manual') {
+  const s = settingsForAdmin();
+  s.paperAvailableSol = Number(s.paperAvailableSol || 0) + Number(sold.currentSol || 0);
+  s.paperPnlSol = Number(s.paperPnlSol || 0) + Number(sold.pnlSol || 0);
+  let autoType = triggerType;
+  if (reason.includes('وقف خسارة')) autoType = 'وقف خسارة'; else if (reason.includes('الربح النهائي')) autoType = 'هدف ثاني'; else if (reason.includes('الربح الأول')) autoType = 'هدف أول'; else if (reason.includes('Trailing')) autoType = 'تراجع'; else if (reason.includes('حماية رأس المال')) autoType = 'حماية'; else if (reason.includes('بيع زمني')) autoType = 'زمني'; else if (reason.includes('يدوي')) autoType = 'يدوي';
+  const holdSec = value.openedAt ? Math.round((Date.now() - new Date(value.openedAt).getTime()) / 1000) : 0;
+  s.paperEvents = [...(s.paperEvents || []), { type: 'بيع', name: `${value.name} (${value.symbol})`, mint: value.mint, detail: `${reason} | ${Number(sold.currentSol).toFixed(4)} SOL (${Number(sold.pnlPct).toFixed(1)}%)`, metadata: { reason, triggerType: autoType, investedSol: Number(value.investedSol || 0), currentSol: Number(sold.currentSol || 0), pnlSol: Number(sold.pnlSol || 0), pnlPct: Number(sold.pnlPct || 0), fraction: Number(sold.fraction || 1), holdSeconds: holdSec, filtersAtSell: { stopLoss: `-${s.paperStopLossPct}%`, tp1: `+${s.paperTakeProfitFirstPct}%`, tp2: `+${s.paperTakeProfitFinalPct}%`, capitalProtection: s.capitalProtectionEnabled ? `${s.capitalProtectionSellPct}%@-${s.capitalProtectionTriggerPct}%` : 'معطل', maxHoldTime: s.maxHoldTimeMin > 0 ? `${s.maxHoldTimeMin}د` : 'معطل' } }, timestamp: Date.now() }].slice(-20);
+  saveSettings(config.adminId, s, config.encryptionKey);
+  await updatePanel(s);
+}
 async function dashboard(ctx) { if (!isAdmin(ctx)) return ctx.reply('أهلاً بك في بوت Solana. يمكنك متابعة حالة المراقب وقراءة التعليمات من الأزرار أدناه.', { reply_markup: publicMenu() }); const s = settingsForAdmin(); if (s.paperPanelMessageId) { await updatePanel(s, ctx); return; } const sent = await ctx.reply(panelText(s), { reply_markup: panelKeyboard(s) }); s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = sent.message_id; saveSettings(config.adminId, s, config.encryptionKey); }
 bot.command(['start', 'menu'], dashboard);
 bot.command('panel', dashboard);
@@ -184,7 +255,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
       await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: candidate.mint, outputMint: SOL_MINT, amountLamports: Number(quote.outAmount), slippageBps: 100 });
       const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint: candidate.mint, investedSol: amountSol, quote, metadata: candidate });
       s.paperAvailableSol = Number(s.paperAvailableSol) - amountSol; s.tradesToday += 1; saveSettings(config.adminId, s, config.encryptionKey);
-      const tokenAmount = Number(quote.outAmount) / (10 ** Number(candidate.decimals ?? 6)); const unitPrice = amountSol / tokenAmount; s.paperEvents = [...(s.paperEvents || []), { type: 'شراء', name: `${candidate.name} (${candidate.symbol})`, mint: candidate.mint, detail: `${amountSol.toFixed(4)} SOL | ${tokenAmount.toLocaleString()} Token | سعر الوحدة ${unitPrice.toFixed(12)} SOL | سيولة ${candidate.liquiditySol.toFixed(2)} SOL` }].slice(-10);
+      const tokenAmount = Number(quote.outAmount) / (10 ** Number(candidate.decimals ?? 6)); const unitPrice = amountSol / tokenAmount; const ageSec = candidate.createdAt ? Math.round(Date.now() / 1000 - Number(candidate.createdAt)) : 0; s.paperEvents = [...(s.paperEvents || []), { type: 'شراء', name: `${candidate.name} (${candidate.symbol})`, mint: candidate.mint, detail: `${amountSol.toFixed(4)} SOL | ${tokenAmount.toLocaleString()} Token`, metadata: { amountSol: Number(amountSol), tokenAmount, unitPrice, liquiditySol: Number(candidate.liquiditySol || 0), marketCapUsd: Number(candidate.marketCapUsd || 0), volumeUsd: Number(candidate.volumeUsd || 0), uniqueBuyers: Number(candidate.uniqueBuyers || 0), bondingCurveProgress: Number(candidate.bondingCurveProgress || 0), bondingCurveSource: candidate.bondingCurveProgressSource || '—', ageSeconds: ageSec, socialLinks: candidate.socialLinks?.length || 0, mintAuthority: candidate.mintAuthority ? 'موجود' : 'معطل', freezeAuthority: candidate.freezeAuthority ? 'موجود' : 'معطل', filtersAtBuy: { curveRange: `${s.minCurveProgress}-${s.maxCurveProgress}%`, minVolume: `$${s.minVolumeUsd}`, minBuyers: s.minUniqueBuyers, maxDev: `≤${s.maxCreatorHoldingsPct}%`, maxTop: `≤${s.maxTopHoldersPct}%`, minLiquidity: `${s.minLiquiditySol} SOL`, ageRange: `${s.minTokenAgeSec}-${s.maxTokenAgeSec}ث`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'حر', social: s.requireSocialLinks ? 'إلزامي' : 'حر' } }, timestamp: Date.now() }].slice(-20);
       saveSettings(config.adminId, s, config.encryptionKey); await updatePanel(s);
       return;
     }
@@ -228,25 +299,32 @@ async function monitorPaperPositions() {
       const ageMin = position.openedAt ? (Date.now() - new Date(position.openedAt).getTime()) / 60000 : 0;
       let fraction = 0;
       let reason = '';
+      let triggerType = 'Manual';
       let capitalProtection = false;
       if (Number(s.maxHoldTimeMin) > 0 && ageMin >= Number(s.maxHoldTimeMin)) {
         fraction = 1;
+        triggerType = 'TimeBased';
         reason = `بيع زمني بعد ${Number(s.maxHoldTimeMin)} دقيقة`;
       } else if (s.capitalProtectionEnabled && value.pnlPct <= -capitalTrigger && !position.capitalProtectionTriggered) {
         fraction = Math.min(Math.max(capitalSellPct / 100, 0), 1);
         capitalProtection = fraction > 0;
+        triggerType = 'CapitalProtection';
         reason = `حماية رأس المال — بيع ${capitalSellPct}% عند -${capitalTrigger}%`;
       } else if (value.pnlPct <= -stopLoss) {
         fraction = 1;
+        triggerType = 'SL';
         reason = `وقف خسارة -${stopLoss}% — إغلاق المركز بالكامل`;
       } else if (value.pnlPct <= highestPnlPct - 15) {
         fraction = 1;
+        triggerType = 'Trailing';
         reason = `Trailing Stop — تراجع من أعلى ربح ${highestPnlPct.toFixed(1)}% إلى ${value.pnlPct.toFixed(1)}%`;
       } else if (value.pnlPct >= finalTarget) {
         fraction = 1;
+        triggerType = 'TP2';
         reason = `جني الربح النهائي +${finalTarget}% — إغلاق المركز بالكامل`;
       } else if (value.pnlPct >= firstTarget && !position.tp1Sold) {
         fraction = 0.5;
+        triggerType = 'TP1';
         reason = `جني الربح الأول +${firstTarget}% — بيع 50٪`;
       }
       if (!fraction) return;
@@ -260,7 +338,7 @@ async function monitorPaperPositions() {
           const updatedPositions = (user.paperPositions || []).map((p) => p.id === value.id ? { ...p, capitalProtectionTriggered: true } : p);
           saveUser(config.adminId, { ...user, paperPositions: updatedPositions }, config.encryptionKey);
         }
-        await recordPaperSale(value, sold, reason);
+        await recordPaperSale(value, sold, reason, triggerType);
       } catch (error) { console.error(`Close error ${value.id}: ${error.message}`); }
     }));
   } catch (error) {
