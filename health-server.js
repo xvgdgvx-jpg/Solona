@@ -62,7 +62,10 @@ app.get('/cron-ping', (req, res) => {
 app.get('/helius-status', (_req, res) => {
   try {
     const bot = require('./bot');
+    const config = require('./config');
+    const { getPositions } = require('./services/paper');
     const w = bot.watcher;
+    const positions = getPositions(config.adminId, config.encryptionKey);
     res.json({
       helius: {
         streamMode: w?.streamMode || false,
@@ -86,6 +89,13 @@ app.get('/helius-status', (_req, res) => {
         hasHeliusRpcUrl: !!process.env.HELIUS_RPC_URL,
         hasSolanaRpcUrl: !!process.env.SOLANA_RPC_URL,
         activeRpc: process.env.HELIUS_RPC_URL ? 'HELIUS_RPC_URL' : process.env.SOLANA_RPC_URL ? 'SOLANA_RPC_URL' : 'default',
+      },
+      positions: {
+        open: positions.filter((p) => p.status === 'open').length,
+        closing: positions.filter((p) => p.status === 'closing').length,
+        closed: positions.filter((p) => p.status === 'closed').length,
+        total: positions.length,
+        totalInvested: positions.filter((p) => p.status === 'open').reduce((sum, p) => sum + Number(p.investedSol || 0), 0),
       },
     });
   } catch (error) {

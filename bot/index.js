@@ -3,7 +3,7 @@ const config = require('../config');
 const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, SOL_MINT, keypairFromSecret } = require('../services/solana');
 const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
-const { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions } = require('../services/paper');
+const { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, cleanupStaleClosing } = require('../services/paper');
 const { getUser, saveUser, resetSettings } = require('../services/storage');
 const { startHealthServer, app } = require('../health-server');
 
@@ -375,7 +375,7 @@ async function monitorPaperPositions() {
   try {
     const { values } = await refreshPositionsCached({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
     monitorErrorsCount = 0;
-    await Promise.all(values.map(async (value) => {
+    for (const value of values) {
       if (value.pricingError) {
         s.consecutiveFailures = (s.consecutiveFailures || 0) + 1;
         saveSettings(config.adminId, s, config.encryptionKey);
@@ -440,7 +440,7 @@ async function monitorPaperPositions() {
         }
         await recordPaperSale(value, sold, reason, triggerType);
       } catch (error) { s.consecutiveFailures = (s.consecutiveFailures || 0) + 1; saveSettings(config.adminId, s, config.encryptionKey); console.error(`Close error ${value.id}: ${error.message}`); if (s.consecutiveFailures >= Number(s.maxConsecutiveFailures || 5)) { s.killSwitch = true; watcherManuallyEnabled = false; watcher.stop(); console.error('🛑 تم تفعيل قاطع الطوارئ'); } }
-    }));
+    }
   } catch (error) {
     monitorErrorsCount += 1;
     console.error(`Paper position monitor error: ${error.message}`);
@@ -456,6 +456,9 @@ async function monitorPaperPositions() {
   }
 }
 setInterval(monitorPaperPositions, 50);
+setInterval(() => {
+  cleanupStaleClosing(config.adminId, config.encryptionKey).catch((error) => console.error(`[cleanup] ${error.message}`));
+}, 60 * 1000);
 function startWatcher() {
   watcherManuallyEnabled = true;
   watcher.start();

@@ -3,6 +3,8 @@ const path = require('node:path');
 const config = require('./config');
 const bot = require('./bot');
 const { startHealthServer } = require('./health-server');
+const { getSettings, saveSettings } = require('./services/settings');
+const { getPositions } = require('./services/paper');
 
 const lockPath = path.join(__dirname, 'data', 'bot.lock');
 let lockOwned = false;
@@ -62,6 +64,17 @@ let botReady = false;
 let lastBotError = null;
 let shuttingDown = false;
 const server = startHealthServer();
+const startupSettings = getSettings(config.adminId, config.encryptionKey);
+const startupPositions = getPositions(config.adminId, config.encryptionKey);
+const openInvested = startupPositions
+  .filter((position) => position.status === 'open')
+  .reduce((sum, position) => sum + Number(position.investedSol || 0), 0);
+const expectedAvailable = Number(startupSettings.paperCapitalSol || 3) - openInvested;
+if (Math.abs(Number(startupSettings.paperAvailableSol) - expectedAvailable) > 0.001) {
+  console.log(`[sync] تصحيح الرصيد: ${startupSettings.paperAvailableSol} → ${expectedAvailable}`);
+  startupSettings.paperAvailableSol = expectedAvailable;
+  saveSettings(config.adminId, startupSettings, config.encryptionKey);
+}
 let retryDelayMs = 5000;
 let retryTimer = null;
 const conflictMessage = '[telegram] ⚠️ Conflict — نسخة أخرى تعمل بنفس التوكن. تحقق من: 1) Render services, 2) keep-alive.js, 3) تشغيل محلي';

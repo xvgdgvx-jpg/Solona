@@ -3,7 +3,25 @@ const { getQuote, getTokenBalance, executeSwap, checkSolReceived, SOL_MINT, keyp
 const { getUser, saveUser } = require('./storage');
 
 const getPositions = (adminId, key) => getUser(adminId, key).paperPositions || [];
-const savePositions = (adminId, positions, key) => { const user = getUser(adminId, key); saveUser(adminId, { ...user, paperPositions: positions }, key); };
+let _positionsLock = Promise.resolve();
+function withPositionsLock(fn) {
+  const previous = _positionsLock;
+  let release;
+  _positionsLock = new Promise((resolve) => { release = resolve; });
+  return previous.then(fn).finally(() => release());
+}
+function savePositionsUnlocked(adminId, positions, key) {
+  const user = getUser(adminId, key);
+  const existing = user.paperPositions || [];
+  const merged = existing.map((old) => positions.find((p) => p.id === old.id) || old);
+  for (const position of positions) {
+    if (!merged.find((item) => item.id === position.id)) merged.push(position);
+  }
+  saveUser(adminId, { ...user, paperPositions: merged }, key);
+}
+function savePositions(adminId, positions, key) {
+  return withPositionsLock(() => savePositionsUnlocked(adminId, positions, key));
+}
 let priceCache = { data: null, timestamp: 0 };
 const PRICE_CACHE_MS = 50;
 
@@ -43,6 +61,7 @@ async function solUsd() {
 }
 
 async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote, metadata = {}, mode = 'paper', buySignature = null }) {
+  return withPositionsLock(async () => {
   const positions = getPositions(adminId, key);
   const outAmount = Number(quote.outAmount);
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
@@ -86,8 +105,9 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
       marketCapUsd: Number(metadata.marketCapUsd || 0),
     });
   }
-  savePositions(adminId, positions, key);
+  savePositionsUnlocked(adminId, positions, key);
   return positions.find((p) => p.mint === mint && p.status === 'open');
+  });
 }
 
 async function refreshSinglePosition({ jupiterUrl, position }) {
@@ -115,7 +135,7 @@ async function refreshPositions({ adminId, key, jupiterUrl }) {
       highestChanged = true;
     }
   }
-  if (highestChanged) savePositions(adminId, positions, key);
+  if (highestChanged) await savePositions(adminId, positions, key);
   const usd = await solUsd();
   return { values, solUsd: usd };
 }
@@ -129,12 +149,13 @@ async function refreshPositionsCached(params) {
 }
 
 async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUrl, rpcUrl, ownerSecret }) {
+  return withPositionsLock(async () => {
   const positions = getPositions(adminId, key);
   const position = positions.find((p) => p.id === positionId && p.status === 'open');
   if (!position) return null;
   position.status = 'closing';
   position.updatedAt = Date.now();
-  savePositions(adminId, positions, key);
+  savePositionsUnlocked(adminId, positions, key);
   try {
     if (position.mode === 'live') {
       if (!rpcUrl || !ownerSecret) throw new Error('إعدادات RPC أو المحفظة غير متوفرة لإغلاق المركز الحي.');
@@ -163,7 +184,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
         position.status = 'open';
       }
       position.updatedAt = Date.now();
-      savePositions(adminId, positions, key);
+      savePositionsUnlocked(adminId, positions, key);
       return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature };
     }
 
@@ -180,16 +201,34 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
     position.consecutivePricingErrors = 0;
     position.lastPricingAt = Date.now();
     position.updatedAt = Date.now();
-    savePositions(adminId, positions, key);
+    savePositionsUnlocked(adminId, positions, key);
     return { ...value, fraction };
   } catch (error) {
     position.status = 'open';
     position.consecutivePricingErrors = (position.consecutivePricingErrors || 0) + 1;
     position.lastPricingAt = Date.now();
     position.updatedAt = Date.now();
-    savePositions(adminId, positions, key);
+    savePositionsUnlocked(adminId, positions, key);
     throw error;
   }
+  });
 }
 
-module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions };
+function cleanupStaleClosing(adminId, key) {
+  return withPositionsLock(() => {
+    const positions = getPositions(adminId, key);
+    const now = Date.now();
+    let changed = false;
+    for (const position of positions) {
+      if (position.status === 'closing' && position.updatedAt && now - position.updatedAt > 5 * 60 * 1000) {
+        console.log(`[cleanup] إعادة فتح مركز عالق: ${position.id}`);
+        position.status = 'open';
+        position.updatedAt = now;
+        changed = true;
+      }
+    }
+    if (changed) savePositionsUnlocked(adminId, positions, key);
+  });
+}
+
+module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, savePositions, cleanupStaleClosing };
