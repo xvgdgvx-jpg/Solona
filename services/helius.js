@@ -4,7 +4,7 @@ const WebSocket = require('ws');
 const PUMP_PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
 class HeliusService {
-  constructor({ apiKey, rpcUrl, wsUrl, onMint, onError }) {
+  constructor({ apiKey, rpcUrl, wsUrl, onMint, onError, onState }) {
     console.log(`[helius] ENV check: apiKey=${!!process.env.HELIUS_API_KEY}, rpc=${!!process.env.HELIUS_RPC_URL}, ws=${!!process.env.HELIUS_WS_URL}`);
     apiKey = apiKey || process.env.HELIUS_API_KEY;
     rpcUrl = rpcUrl || process.env.HELIUS_RPC_URL;
@@ -23,10 +23,18 @@ class HeliusService {
     this.wsUrl = wsUrl;
     this.onMint = onMint;
     this.onError = onError;
+    this.onState = onState || (() => {});
     this.ws = null;
     this.wsPing = null;
     this.reconnectTimer = null;
     this.connectionTimeout = null;
+    this.noEventTimer = null;
+    this.fallbackTimer = null;
+    this.fallbackActive = false;
+    this.noEventWarningShown = false;
+    this.lastEventAt = null;
+    this.lastError = null;
+    this.subscriptionId = null;
     this.stopped = true;
   }
 
@@ -41,17 +49,23 @@ class HeliusService {
 
   stop() {
     this.stopped = true;
+    this.onState(false);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.connectionTimeout) clearTimeout(this.connectionTimeout);
     if (this.wsPing) clearInterval(this.wsPing);
+    if (this.noEventTimer) clearInterval(this.noEventTimer);
+    if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
     this.reconnectTimer = null;
     this.connectionTimeout = null;
     this.wsPing = null;
+    this.noEventTimer = null;
+    this.fallbackTimer = null;
     if (this.ws) this.ws.close();
     this.ws = null;
   }
 
   reportError(error) {
+    this.lastError = error.message;
     console.error(`[helius] ❌ Error: ${error.message}`);
     this.onError(error);
   }
@@ -73,8 +87,13 @@ class HeliusService {
       this.connectionTimeout = null;
       console.log('[helius] ✅ WebSocket connected successfully');
       console.log('[helius] ✅ Stream opened');
+      this.lastEventAt = Date.now();
+      this.noEventWarningShown = false;
+      this.fallbackActive = false;
+      this.onState(true);
       this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'transactionSubscribe', params: [{ failed: false, accountInclude: [PUMP_PROGRAM_ID] }, { commitment: 'confirmed', encoding: 'jsonParsed', transactionDetails: 'full', maxSupportedTransactionVersion: 1 }] }));
       this.wsPing = setInterval(() => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.ping(); }, 10000);
+      this.noEventTimer = setInterval(() => this.checkEventHealth(), 10000);
     });
     this.ws.on('message', (raw) => this.handleMessage(raw));
     this.ws.on('error', (error) => this.reportError(error));
@@ -86,13 +105,50 @@ class HeliusService {
       const reason = reasonBuffer?.toString() || 'none';
       console.log(`[helius] ⚠️ Stream closed: code=${code}, reason=${reason}`);
       this.ws = null;
-      if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+      if (!this.stopped && !this.fallbackActive) this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     });
+  }
+
+  checkEventHealth() {
+    if (this.stopped || this.fallbackActive || !this.lastEventAt) return;
+    const elapsed = Date.now() - this.lastEventAt;
+    if (elapsed >= 30000 && !this.noEventWarningShown) {
+      this.noEventWarningShown = true;
+      console.warn('[helius] ⚠️ No events received in 30s — subscription may be dead');
+    }
+    if (elapsed >= 60000) this.pauseForRestFallback();
+  }
+
+  pauseForRestFallback() {
+    if (this.stopped || this.fallbackActive) return;
+    this.fallbackActive = true;
+    this.onState(false);
+    console.warn('[helius] ⚠️ No events received in 60s — pausing WebSocket and using REST');
+    if (this.noEventTimer) clearInterval(this.noEventTimer);
+    if (this.wsPing) clearInterval(this.wsPing);
+    this.noEventTimer = null;
+    this.wsPing = null;
+    if (this.ws) this.ws.close();
+    this.ws = null;
+    this.fallbackTimer = setTimeout(() => {
+      this.fallbackTimer = null;
+      if (this.stopped) return;
+      console.log('[helius] Retrying WebSocket after 2-minute REST fallback');
+      this.fallbackActive = false;
+      this.lastEventAt = Date.now();
+      this.connect();
+    }, 120000);
   }
 
   handleMessage(raw) {
     try {
       const payload = JSON.parse(raw.toString());
+      this.lastEventAt = Date.now();
+      if (payload.id === 1 && payload.result != null) {
+        this.subscriptionId = payload.result;
+        console.log(`[helius] ✅ Pump.fun subscription registered: ${this.subscriptionId}`);
+        return;
+      }
       const result = payload.params?.result;
       const logs = result?.transaction?.meta?.logMessages || [];
       if (!result || !logs.some((log) => log.includes('Instruction: InitializeMint2'))) return;

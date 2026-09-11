@@ -412,7 +412,12 @@ async function monitorPaperPositions() {
   }
 }
 setInterval(monitorPaperPositions, 50);
-function startWatcher() { console.log('Pump.fun watcher is manual-only; press the start button to enable it.'); return false; }
+function startWatcher() {
+  watcherManuallyEnabled = true;
+  watcher.start();
+  console.log('Pump.fun watcher started: Helius WebSocket + REST fallback are running in parallel.');
+  return true;
+}
 module.exports = bot;
 module.exports.startWatcher = startWatcher;
 module.exports.watcher = watcher;

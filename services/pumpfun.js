@@ -28,6 +28,7 @@ class PumpFunWatcher {
       wsUrl: process.env.HELIUS_WS_URL,
       onMint: (event) => this.handleHeliusMint(event),
       onError: (error) => this.handleHeliusError(error),
+      onState: (connected) => this.handleHeliusState(connected),
     });
     this.streamMode = false;
   }
@@ -43,19 +44,13 @@ class PumpFunWatcher {
     this.lastError = `Helius: ${error.message}`;
     this.onError(error);
     this.heliusFailures = (this.heliusFailures || 0) + 1;
-    if (this.running && this.streamMode && error.code === 'HELIUS_CONNECT_TIMEOUT') {
-      this.streamMode = false;
+  }
+
+  handleHeliusState(connected) {
+    this.streamMode = Boolean(connected);
+    if (connected) {
       this.heliusFailures = 0;
-      try { this.helius.stop(); } catch (_) {}
-      this.loop();
-      return;
-    }
-    if (this.running && this.streamMode && this.heliusFailures >= 3) {
-      console.log('[helius] Too many failures — falling back to REST polling');
-      this.streamMode = false;
-      this.heliusFailures = 0;
-      try { this.helius.stop(); } catch (_) {}
-      this.loop();
+      console.log('[helius] WebSocket active; REST polling remains enabled as fallback');
     }
   }
 
@@ -66,8 +61,8 @@ class PumpFunWatcher {
     const interval = Math.max(3000, Number(process.env.WATCHLIST_POLL_MS || 5000));
     this.watchTimer = setInterval(() => this.recheckWatchlist(), interval);
     console.log(`Pump.fun watchlist polling every ${interval}ms`);
-    if (!this.streamMode) this.loop();
-    else console.log('Helius Pump.fun WebSocket stream started');
+    this.loop();
+    if (this.streamMode) console.log('Helius Pump.fun WebSocket stream started; REST fallback also active');
   }
 
   stop() {
@@ -139,7 +134,7 @@ class PumpFunWatcher {
   }
 
   async loop() {
-    while (this.running && !this.streamMode) {
+    while (this.running) {
       try {
         this.lastPollAt = new Date().toISOString();
         const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
