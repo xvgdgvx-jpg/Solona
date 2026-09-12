@@ -36,6 +36,7 @@ class HeliusService {
     this.lastError = null;
     this.subscriptionId = null;
     this.stopped = true;
+    this.statsCache = new Map();
   }
 
   enabled() { return Boolean(this.apiKey && this.rpcUrl && this.wsUrl); }
@@ -172,6 +173,36 @@ class HeliusService {
 
   async getAsset(id) { return this.rpc('getAsset', { id, displayOptions: { showFungible: true, showInscription: false } }); }
 
+  async getRecentTraderStats(bondingCurve) {
+    if (!bondingCurve) return {};
+    const cached = this.statsCache.get(bondingCurve);
+    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    try {
+      const signatures = await this.rpc('getSignaturesForAddress', [bondingCurve, { limit: 40, commitment: 'confirmed' }]);
+      const usable = (signatures || []).filter((item) => !item.err).slice(0, 20);
+      const transactions = await Promise.all(usable.map((item) => this.rpc('getTransaction', [item.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null)));
+      const buyers = new Set();
+      const sellers = new Set();
+      for (const tx of transactions) {
+        const logs = tx?.meta?.logMessages || [];
+        const side = logs.some((log) => /Instruction: Buy/i.test(log)) ? 'buy' : logs.some((log) => /Instruction: Sell/i.test(log)) ? 'sell' : null;
+        if (!side) continue;
+        const keys = tx.transaction?.message?.accountKeys || [];
+        const signers = keys.filter((key) => key.signer).map((key) => typeof key === 'string' ? key : key.pubkey).filter(Boolean);
+        const target = side === 'buy' ? buyers : sellers;
+        signers.forEach((signer) => { if (signer !== PUMP_PROGRAM_ID && signer !== bondingCurve) target.add(signer); });
+      }
+      const value = { uniqueBuyers: buyers.size, uniqueSellers: sellers.size, traderStatsSource: 'helius-rpc-transactions' };
+      this.statsCache.set(bondingCurve, { at: Date.now(), value });
+      return value;
+    } catch (error) {
+      console.warn(`[helius] trader stats unavailable for ${bondingCurve}: ${error.message}`);
+      const value = { traderStatsSource: 'helius-rpc-unavailable' };
+      this.statsCache.set(bondingCurve, { at: Date.now(), value });
+      return value;
+    }
+  }
+
   async enrichToken(mint, creator = null, bondingCurve = null) {
     let asset;
     let largest;
@@ -204,6 +235,7 @@ class HeliusService {
         creatorAmount = (accounts?.value || []).reduce((sum, item) => sum + Number(item.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0), 0);
       } catch (_) { creatorAmount = null; }
     }
+    const traderStats = await this.getRecentTraderStats(bondingCurve);
     const metadata = asset.content?.metadata || {};
     const links = asset.content?.links || {};
     const social = [metadata.twitter, metadata.telegram, metadata.website, links.twitter, links.telegram, links.external_url].filter(Boolean);
@@ -215,8 +247,9 @@ class HeliusService {
       creator,
       creatorHoldingsPct,
       topHoldersPct,
-      uniqueBuyers: null,
-      uniqueSellers: null,
+      uniqueBuyers: traderStats.uniqueBuyers ?? null,
+      uniqueSellers: traderStats.uniqueSellers ?? null,
+      traderStatsSource: traderStats.traderStatsSource || null,
       volumeUsd: null,
       buyVolumeUsd: null,
       sellVolumeUsd: null,
