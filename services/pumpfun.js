@@ -99,7 +99,7 @@ class PumpFunWatcher {
     };
   }
 
-  async fetchDexScreenerVolume(mint) {
+  async fetchDexScreenerData(mint) {
     const cached = this.dexCache.get(mint);
     if (cached && Date.now() - cached.at < 30000) return cached.value;
     const empty = {};
@@ -109,13 +109,19 @@ class PumpFunWatcher {
         ? data.pairs.filter((pair) => String(pair.chainId).toLowerCase() === 'solana')
         : [];
       const pair = pairs
-        .filter((item) => Number.isFinite(Number(item?.volume?.h24)))
-        .sort((a, b) => Number(b.volume.h24) - Number(a.volume.h24))[0];
+        .filter((item) => Number.isFinite(Number(item?.volume?.h24)) || Number.isFinite(Number(item?.marketCap)) || Number.isFinite(Number(item?.fdv)))
+        .sort((a, b) => Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0))[0];
       const value = pair ? {
-        volumeUsd: Number(pair.volume.h24),
+        volumeUsd: Number.isFinite(Number(pair.volume?.h24)) ? Number(pair.volume.h24) : null,
+        marketCapUsd: Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : (Number.isFinite(Number(pair.fdv)) ? Number(pair.fdv) : null),
+        liquidityUsd: Number.isFinite(Number(pair.liquidity?.usd)) ? Number(pair.liquidity.usd) : null,
+        priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
+        dexScreenerBuys: Number(pair.txns?.h24?.buys || 0),
+        dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
         dexScreenerPair: pair.pairAddress || null,
         dexScreenerDex: pair.dexId || null,
         dexScreenerUpdatedAt: Date.now(),
+        marketDataSource: 'dexscreener',
       } : empty;
       this.dexCache.set(mint, { at: Date.now(), value });
       return value;
@@ -451,16 +457,18 @@ class PumpFunWatcher {
 
   async ensureDexVolume(candidate) {
     const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
-    if (minVolumeUsd <= 0) return { attempted: false, found: false };
-    const primaryVolumeMissingOrLow = candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd);
-    if (!primaryVolumeMissingOrLow || this.filterReason(candidate, { skipVolume: true })) return { attempted: false, found: false };
-    const dex = await this.fetchDexScreenerVolume(candidate.mint);
-    if (Number.isFinite(dex.volumeUsd)) {
+    const needsVolumeCheck = minVolumeUsd > 0 && (candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd));
+    const needsMarketData = candidate.marketDataSource !== 'dexscreener';
+    if ((!needsVolumeCheck && !needsMarketData) || this.filterReason(candidate, { skipVolume: true })) return { attempted: false, found: false };
+    const dex = await this.fetchDexScreenerData(candidate.mint);
+    if (dex.marketDataSource) {
+      if (Number.isFinite(dex.volumeUsd)) candidate.volumeUsd = dex.volumeUsd;
+      if (Number.isFinite(dex.marketCapUsd)) candidate.marketCapUsd = dex.marketCapUsd;
       Object.assign(candidate, dex);
-      console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | pair=${dex.dexScreenerPair || 'none'} | dex=${dex.dexScreenerDex || 'unknown'} | volume=$${dex.volumeUsd.toFixed(2)}`);
+      console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | pair=${dex.dexScreenerPair || 'none'} | volume=$${Number(dex.volumeUsd || 0).toFixed(2)} | mc=$${Number(dex.marketCapUsd || 0).toFixed(2)} | buys=${dex.dexScreenerBuys} | sells=${dex.dexScreenerSells}`);
       return { attempted: true, found: true };
     }
-    console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | no Solana pair/volume`);
+    console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | no Solana pair/market data`);
     return { attempted: true, found: false };
   }
 
@@ -527,7 +535,7 @@ class PumpFunWatcher {
           await this.ensureDexVolume(candidate);
           const reason = this.filterReason(candidate);
           const volumeText = Number.isFinite(candidate.volumeUsd) ? `$${candidate.volumeUsd.toFixed(2)}` : 'unknown';
-          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=${volumeText} (${candidate.dexScreenerPair ? 'DexScreener' : 'primary/unknown'}) | buyers=${candidate.uniqueBuyers ?? 'unknown'} | result=${reason || 'PASS'}`);
+          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=${volumeText} (${candidate.dexScreenerPair ? 'DexScreener' : 'primary/unknown'}) | mc=${Number.isFinite(candidate.marketCapUsd) ? `$${candidate.marketCapUsd.toFixed(2)}` : 'unknown'} | buyers=${candidate.uniqueBuyers ?? 'unknown'} | result=${reason || 'PASS'}`);
           await this.evaluate(candidate);
         } catch (error) {
           this.lastError = `إعادة فحص: ${error.message}`;
