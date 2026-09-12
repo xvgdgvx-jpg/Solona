@@ -449,13 +449,23 @@ class PumpFunWatcher {
     return null;
   }
 
-  async evaluate(candidate) {
+  async ensureDexVolume(candidate) {
     const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
+    if (minVolumeUsd <= 0) return { attempted: false, found: false };
     const primaryVolumeMissingOrLow = candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd);
-    if (minVolumeUsd > 0 && primaryVolumeMissingOrLow && !this.filterReason(candidate, { skipVolume: true })) {
-      const dex = await this.fetchDexScreenerVolume(candidate.mint);
-      if (Number.isFinite(dex.volumeUsd)) Object.assign(candidate, dex);
+    if (!primaryVolumeMissingOrLow || this.filterReason(candidate, { skipVolume: true })) return { attempted: false, found: false };
+    const dex = await this.fetchDexScreenerVolume(candidate.mint);
+    if (Number.isFinite(dex.volumeUsd)) {
+      Object.assign(candidate, dex);
+      console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | pair=${dex.dexScreenerPair || 'none'} | dex=${dex.dexScreenerDex || 'unknown'} | volume=$${dex.volumeUsd.toFixed(2)}`);
+      return { attempted: true, found: true };
     }
+    console.log(`[dexscreener] ${candidate.symbol} ${candidate.mint} | no Solana pair/volume`);
+    return { attempted: true, found: false };
+  }
+
+  async evaluate(candidate) {
+    await this.ensureDexVolume(candidate);
     const reason = this.filterReason(candidate);
     if (!reason) {
       this.watchlist.delete(candidate.mint);
@@ -514,9 +524,10 @@ class PumpFunWatcher {
             const timeout = new Promise((resolve) => setTimeout(() => resolve({}), 500));
             Object.assign(candidate, await Promise.race([enrichment, timeout]).catch(() => ({})));
           }
+          await this.ensureDexVolume(candidate);
           const reason = this.filterReason(candidate);
           const volumeText = Number.isFinite(candidate.volumeUsd) ? `$${candidate.volumeUsd.toFixed(2)}` : 'unknown';
-          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=${volumeText} | buyers=${candidate.uniqueBuyers ?? 'unknown'} | result=${reason || 'PASS'}`);
+          console.log(`[watchlist] ${candidate.symbol} ${mint} | curve=${candidate.bondingCurveProgress.toFixed(2)}% (${candidate.bondingCurveProgressSource}) | volume=${volumeText} (${candidate.dexScreenerPair ? 'DexScreener' : 'primary/unknown'}) | buyers=${candidate.uniqueBuyers ?? 'unknown'} | result=${reason || 'PASS'}`);
           await this.evaluate(candidate);
         } catch (error) {
           this.lastError = `إعادة فحص: ${error.message}`;
