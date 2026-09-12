@@ -2,7 +2,7 @@ const { getUser, saveUser } = require('./storage');
 
 const defaults = {
   // ── حالة التشغيل ──
-  autoSniperEnabled: true,
+  autoSniperEnabled: false,
   paperTradingEnabled: true,
   autoSellEnabled: true,
 
