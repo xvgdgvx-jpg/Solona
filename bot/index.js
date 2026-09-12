@@ -306,7 +306,7 @@ bot.callbackQuery('portfolio', async (ctx) => { await ctx.answerCallbackQuery();
 bot.callbackQuery('snipe', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply(isAdmin(ctx) ? 'للمشرف: استخدم /settings لضبط الفلاتر، ثم /settings sniper on لتشغيل مراقبة Pump.fun.' : 'القنص والتداول من وظائف المشرف فقط. يمكنك متابعة الحالة باستخدام /status.'); });
 bot.callbackQuery('public:status', async (ctx) => { await ctx.answerCallbackQuery(); const status = watcher.status(); await ctx.reply(`حالة المراقب: ${status.running ? 'يعمل الآن' : 'متوقف'}\nالمصدر: ${status.source}\nآخر فحص: ${status.lastPollAt ? new Date(status.lastPollAt).toLocaleString('ar-IQ') : 'لم يبدأ بعد'}`); });
 bot.callbackQuery('public:help', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('هذا البوت يراقب فرص Pump.fun وفق فلاتر أمان محددة.\n\n/status — عرض حالة المراقب\n/start — فتح الواجهة العامة\n\nالتداول والإعدادات محمية للمشرف.'); });
-bot.callbackQuery('settings', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا القسم متاح للمشرف فقط.'); await ctx.reply(settingsText(settingsForAdmin())); });
+bot.callbackQuery('settings', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا القسم متاح للمشرف فقط.'); await ctx.editMessageText(settingsText(settingsForAdmin()), { reply_markup: settingsKeyboard() }); });
 bot.callbackQuery('settings:reset:confirm', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; await ctx.editMessageText('⚠️ ستتم إعادة فلاتر القنص وقيم التشغيل إلى الإعدادات الافتراضية الظاهرة في القائمة، مع بقائها قابلة للتغيير لاحقاً من الأزرار. هل تريد المتابعة؟', { reply_markup: new InlineKeyboard().text('تأكيد الإعدادات الافتراضية ✅', 'settings:reset:do').row().text('إلغاء 🔙', 'panel:settings') }); });
 bot.callbackQuery('settings:reset:do', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; resetSettings(config.adminId, config.encryptionKey); const reset = settingsForAdmin(); watcherManuallyEnabled = Boolean(reset.autoSniperEnabled && !reset.killSwitch); watcher.updateSettings(reset); if (watcherManuallyEnabled) watcher.start(); else watcher.stop(); await ctx.editMessageText(`✅ تمت إعادة الإعدادات الافتراضية وتطبيقها فوراً.\n\n${filterText(reset)}\n\nيمكنك تعديل أي فلتر من الأزرار.`, { reply_markup: filterKeyboard(reset) }); });
 bot.callbackQuery('filters', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; await ctx.editMessageText(filterText(settingsForAdmin()), { reply_markup: filterKeyboard(settingsForAdmin()) }); });
@@ -379,6 +379,14 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
   finally { sniperTradeBusy = false; }
 }});
+const watcherStart = watcher.start.bind(watcher);
+watcher.start = () => {
+  if (!watcherManuallyEnabled) {
+    console.warn('[watcher] start ignored because no explicit Telegram تشغيل action is active');
+    return false;
+  }
+  return watcherStart();
+};
 setInterval(() => {
   const s = settingsForAdmin();
   if (!watcherManuallyEnabled || !s.autoSniperEnabled) return;
