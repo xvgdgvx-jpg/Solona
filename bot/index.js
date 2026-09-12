@@ -81,7 +81,7 @@ const effectiveLiveTrading = (settings) => Boolean(config.liveTrading && setting
 const panelKeyboard = (s) => new InlineKeyboard()
   .text(s.autoSniperEnabled ? '⏹ إيقاف' : '▶️ تشغيل', `panel:${s.autoSniperEnabled ? 'stop' : 'start'}`)
   .text('🔄 تحديث', 'panel:refresh').row()
-  .text(s.paperTradingEnabled ? '🚫 إيقاف الشراء' : '✅ تشغيل الشراء', 'panel:buyoff')
+  .text(s.paperTradingEnabled ? '🚫 إيقاف الشراء' : '✅ تشغيل الشراء', `panel:${s.paperTradingEnabled ? 'buyoff' : 'buyon'}`)
   .text(s.autoSellEnabled ? '🛑 إيقاف البيع' : '💰 تشغيل البيع', `panel:${s.autoSellEnabled ? 'selloff' : 'sellon'}`).row()
   .text(s.killSwitch ? '▶️ إلغاء القاطع' : '🛑 قاطع الطوارئ', `panel:${s.killSwitch ? 'killoff' : 'killon'}`).row()
   .text('⚙️ الإعدادات', 'panel:settings').text('📋 التفاصيل', 'panel:details').row()
@@ -353,7 +353,7 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   if (!s.autoSniperEnabled) return;
   if (sniperTradeBusy) { console.log(`[sniper] تخطي مرشح أثناء تنفيذ صفقة أخرى: ${candidate.mint}`); return; }
   if (!canTrade(s)) return;
-  if (!s.paperTradingEnabled && !effectiveLiveTrading(s)) return;
+  if (!s.paperTradingEnabled) return;
   sniperTradeBusy = true;
   try {
     const walletAddress = keypairFromSecret(userSecret()).publicKey.toBase58();
