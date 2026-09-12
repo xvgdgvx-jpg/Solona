@@ -18,6 +18,11 @@ setInterval(() => {
 }, 60 * 1000);
 
 const bot = new Bot(config.token);
+bot.catch((error) => {
+  const message = String(error?.error?.description || error?.message || error);
+  if (/message is not modified|query is too old|query ID is invalid/i.test(message)) return;
+  console.error(`[telegram] middleware error: ${message}`);
+});
 let botStarted = false;
 const originalStart = bot.start.bind(bot);
 const IS_PRODUCTION = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
@@ -189,7 +194,7 @@ async function recordPaperSale(value, sold, reason, triggerType = 'Manual') {
   saveSettings(config.adminId, s, config.encryptionKey);
   await updatePanel(s);
 }
-async function dashboard(ctx) { if (!isAdmin(ctx)) return ctx.reply('أهلاً بك في بوت Solana. يمكنك متابعة حالة المراقب وقراءة التعليمات من الأزرار أدناه.', { reply_markup: publicMenu() }); const s = settingsForAdmin(); if (s.paperPanelMessageId) { await updatePanel(s, ctx); return; } const sent = await ctx.reply(panelText(s), { reply_markup: panelKeyboard(s) }); s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = sent.message_id; saveSettings(config.adminId, s, config.encryptionKey); }
+async function dashboard(ctx) { if (!isAdmin(ctx)) return ctx.reply('أهلاً بك في بوت Solana. يمكنك متابعة حالة المراقب وقراءة التعليمات من الأزرار أدناه.', { reply_markup: publicMenu() }); const s = settingsForAdmin(); const sent = await ctx.reply(panelText(s), { reply_markup: panelKeyboard(s) }); s.paperPanelChatId = String(ctx.chat.id); s.paperPanelMessageId = sent.message_id; saveSettings(config.adminId, s, config.encryptionKey); }
 bot.command(['start', 'menu'], dashboard);
 bot.command('panel', dashboard);
 bot.command('clean', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.'); const chatId = ctx.chat.id; const current = ctx.msg.message_id; for (let id = current; id > Math.max(0, current - 100); id -= 1) { try { await ctx.api.deleteMessage(chatId, id); } catch (_) {} } });
