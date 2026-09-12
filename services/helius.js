@@ -92,6 +92,8 @@ class HeliusService {
       this.fallbackActive = false;
       this.onState(true);
       this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'transactionSubscribe', params: [{ failed: false, accountInclude: [PUMP_PROGRAM_ID] }, { commitment: 'confirmed', encoding: 'jsonParsed', transactionDetails: 'full', maxSupportedTransactionVersion: 1 }] }));
+      if (this.wsPing) clearInterval(this.wsPing);
+      if (this.noEventTimer) clearInterval(this.noEventTimer);
       this.wsPing = setInterval(() => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.ping(); }, 10000);
       this.noEventTimer = setInterval(() => this.checkEventHealth(), 10000);
     });
@@ -100,8 +102,10 @@ class HeliusService {
     this.ws.on('close', (code, reasonBuffer) => {
       if (this.connectionTimeout) clearTimeout(this.connectionTimeout);
       if (this.wsPing) clearInterval(this.wsPing);
+      if (this.noEventTimer) clearInterval(this.noEventTimer);
       this.connectionTimeout = null;
       this.wsPing = null;
+      this.noEventTimer = null;
       const reason = reasonBuffer?.toString() || 'none';
       console.log(`[helius] ⚠️ Stream closed: code=${code}, reason=${reason}`);
       this.ws = null;

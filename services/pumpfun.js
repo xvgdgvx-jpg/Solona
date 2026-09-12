@@ -17,6 +17,7 @@ class PumpFunWatcher {
     this.watchlist = new Map();
     this.watchTimer = null;
     this.watchlistBusy = false;
+    this.loopGeneration = 0;
     this.lastPollAt = null;
     this.lastCandidate = null;
     this.lastError = null;
@@ -57,16 +58,18 @@ class PumpFunWatcher {
   start() {
     if (this.running) return;
     this.running = true;
+    const generation = ++this.loopGeneration;
     this.streamMode = this.helius.start();
     const interval = Math.max(3000, Number(process.env.WATCHLIST_POLL_MS || 5000));
     this.watchTimer = setInterval(() => this.recheckWatchlist(), interval);
     console.log(`Pump.fun watchlist polling every ${interval}ms`);
-    this.loop();
+    this.loop(generation);
     if (this.streamMode) console.log('Helius Pump.fun WebSocket stream started; REST fallback also active');
   }
 
   stop() {
     this.running = false;
+    this.loopGeneration += 1;
     this.helius.stop();
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = null;
@@ -133,8 +136,8 @@ class PumpFunWatcher {
     await this.evaluate(candidate);
   }
 
-  async loop() {
-    while (this.running) {
+  async loop(generation) {
+    while (this.running && generation === this.loopGeneration) {
       try {
         this.lastPollAt = new Date().toISOString();
         const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
