@@ -32,6 +32,7 @@ class PumpFunWatcher {
       onState: (connected) => this.handleHeliusState(connected),
     });
     this.streamMode = false;
+    this.dexCache = new Map();
   }
 
   updateSettings(settings) {
@@ -96,6 +97,32 @@ class PumpFunWatcher {
       lastError: this.lastError,
       source: this.streamMode ? 'Helius WebSocket + DAS' : this.source,
     };
+  }
+
+  async fetchDexScreenerVolume(mint) {
+    const cached = this.dexCache.get(mint);
+    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    const empty = {};
+    try {
+      const { data } = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 5000 });
+      const pairs = Array.isArray(data?.pairs)
+        ? data.pairs.filter((pair) => String(pair.chainId).toLowerCase() === 'solana')
+        : [];
+      const pair = pairs
+        .filter((item) => Number.isFinite(Number(item?.volume?.h24)))
+        .sort((a, b) => Number(b.volume.h24) - Number(a.volume.h24))[0];
+      const value = pair ? {
+        volumeUsd: Number(pair.volume.h24),
+        dexScreenerPair: pair.pairAddress || null,
+        dexScreenerDex: pair.dexId || null,
+        dexScreenerUpdatedAt: Date.now(),
+      } : empty;
+      this.dexCache.set(mint, { at: Date.now(), value });
+      return value;
+    } catch (error) {
+      this.dexCache.set(mint, { at: Date.now(), value: empty });
+      return empty;
+    }
   }
 
   async fetchCoin(mint) {
@@ -287,7 +314,7 @@ class PumpFunWatcher {
     };
   }
 
-  filterReason(candidate) {
+  filterReason(candidate, options = {}) {
     try { new PublicKey(candidate.mint); } catch { return 'عنوان Mint غير صالح'; }
 
     const s = this.settings;
@@ -319,7 +346,7 @@ class PumpFunWatcher {
     }
 
     const minVol = Number(s.minVolumeUsd ?? 0);
-    if (minVol > 0) {
+    if (minVol > 0 && !options.skipVolume) {
       if (candidate.volumeUsd == null) {
         return '📊 حجم غير معروف — رفض احترازي';
       } else if (candidate.volumeUsd < minVol) {
@@ -423,6 +450,10 @@ class PumpFunWatcher {
   }
 
   async evaluate(candidate) {
+    if (candidate.volumeUsd == null && Number(this.settings.minVolumeUsd ?? 0) > 0 && !this.filterReason(candidate, { skipVolume: true })) {
+      const dex = await this.fetchDexScreenerVolume(candidate.mint);
+      if (Number.isFinite(dex.volumeUsd)) Object.assign(candidate, dex);
+    }
     const reason = this.filterReason(candidate);
     if (!reason) {
       this.watchlist.delete(candidate.mint);
