@@ -172,7 +172,7 @@ class PumpFunWatcher {
         this.lastError = error.message;
         this.onError(error);
       }
-      await sleep(30000);
+      await sleep(Math.max(3000, Number(process.env.PUMPFUN_POLL_MS || 5000)));
     }
   }
 
@@ -321,13 +321,7 @@ class PumpFunWatcher {
     const minVol = Number(s.minVolumeUsd ?? 0);
     if (minVol > 0) {
       if (candidate.volumeUsd == null) {
-        if (!s.allowZeroVolume) {
-          return '📊 حجم غير معروف — رفض احترازي';
-        }
-        const minLiqForZero = Number(s.allowZeroVolumeMinLiq ?? 30);
-        if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol < minLiqForZero) {
-          return `📊 حجم غير معروف + سيولة ${candidate.liquiditySol?.toFixed(1) || '?'} < ${minLiqForZero}`;
-        }
+        return '📊 حجم غير معروف — رفض احترازي';
       } else if (candidate.volumeUsd < minVol) {
         return `📊 حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
       }

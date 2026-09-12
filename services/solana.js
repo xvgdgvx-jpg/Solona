@@ -8,7 +8,14 @@ const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ
 const connection = (rpcUrl) => new Connection(rpcUrl, 'confirmed');
 let lastQuoteAt = 0;
 let jupiterBackoffUntil = 0;
+let quoteQueue = Promise.resolve();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function enqueueQuote(task) {
+  const next = quoteQueue.then(task, task);
+  quoteQueue = next.catch(() => {});
+  return next;
+}
 
 function validateSecretBytes(value) {
   if (!Array.isArray(value) || value.length !== 64 || value.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
@@ -37,11 +44,12 @@ function keypairFromSecret(secret) {
 }
 
 async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLamports, slippageBps = 100 }) {
-  try {
+  return enqueueQuote(async () => {
+   try {
     if (!inputMint || !outputMint || !PublicKey.isOnCurve(new PublicKey(outputMint).toBytes())) throw new Error('عنوان العملة غير صالح.');
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const minInterval = Math.max(750, Number(process.env.JUPITER_MIN_INTERVAL_MS || 1200));
+      const minInterval = Math.max(350, Number(process.env.JUPITER_MIN_INTERVAL_MS || 500));
       const wait = Math.max(0, minInterval - (Date.now() - lastQuoteAt), jupiterBackoffUntil - Date.now());
       if (wait) await sleep(wait);
       try {
@@ -58,13 +66,14 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
       }
     }
     throw lastError;
-  } catch (error) {
+   } catch (error) {
     if (error.message === 'عنوان العملة غير صالح.') throw error;
     const detail = error.response?.data?.error || error.message;
     if (String(detail).toLowerCase().includes('no routes found')) throw new Error('لا يوجد مسار تداول لهذه العملة حالياً؛ قد تكون جديدة جداً أو بلا سيولة في Jupiter.');
     if (error.response?.status === 429) throw new Error('Jupiter مشغول حالياً بسبب كثرة الطلبات؛ أعد المحاولة بعد قليل.');
     throw new Error(`تعذر الحصول على سعر العملة: ${detail}`);
-  }
+   }
+  });
 }
 
 async function getTokenAmount({ rpcUrl, ownerSecret, mint, uiAmount }) {

@@ -303,6 +303,7 @@ bot.callbackQuery(/^ps:(.+):(0\.5|1)$/, async (ctx) => { await ctx.answerCallbac
 
 let lastSniperErrorAt = 0;
 let paperMonitorBusy = false;
+let sniperTradeBusy = false;
 let watcherManuallyEnabled = false;
 let _rejectBuf = {};
 let _checkedBuf = 0;
@@ -312,8 +313,10 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   const safetyBlock = await checkSafetyRails(s);
   if (safetyBlock) { console.log(safetyBlock); return; }
   if (!s.autoSniperEnabled) return;
+  if (sniperTradeBusy) { console.log(`[sniper] تخطي مرشح أثناء تنفيذ صفقة أخرى: ${candidate.mint}`); return; }
   if (!canTrade(s)) return;
   if (!s.paperTradingEnabled && !effectiveLiveTrading(s)) return;
+  sniperTradeBusy = true;
   try {
     const amountSol = paperTradeAmount(s);
     if (!effectiveLiveTrading(s) && (amountSol <= 0 || Number(s.paperAvailableSol) < amountSol)) return;
@@ -337,7 +340,8 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
     s.tradesToday += 1; resetConsecutiveFailures(s); saveSettings(config.adminId, s, config.encryptionKey);
     const status = `تم التنفيذ\n${explorer(result.signature)}`;
     console.log(`Auto-sniper trade completed for ${candidate.mint}: ${status}`);
-  } catch (error) { const now = Date.now(); if (!isTransientQuoteError(error)) { s.consecutiveFailures = (s.consecutiveFailures || 0) + 1; saveSettings(config.adminId, s, config.encryptionKey); } console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
+  } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
+  finally { sniperTradeBusy = false; }
 }});
 setInterval(() => {
   const s = settingsForAdmin();
@@ -393,16 +397,7 @@ async function monitorPaperPositions() {
     monitorErrorsCount = 0;
     for (const value of values) {
       if (value.pricingError) {
-        if (!isTransientQuoteError(value.pricingError)) {
-          s.consecutiveFailures = (s.consecutiveFailures || 0) + 1;
-          saveSettings(config.adminId, s, config.encryptionKey);
-        }
-        if (!isTransientQuoteError(value.pricingError) && s.consecutiveFailures >= Number(s.maxConsecutiveFailures || 5)) {
-          s.killSwitch = true;
-          watcherManuallyEnabled = false;
-          watcher.stop();
-          console.error('🛑 تم تفعيل قاطع الطوارئ بعد أخطاء التسعير');
-        }
+        console.warn(`[monitor] تعذر تسعير ${value.mint}: ${value.pricingError} — استمرار المراقبة`);
         return;
       }
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
@@ -457,7 +452,7 @@ async function monitorPaperPositions() {
           saveUser(config.adminId, { ...user, paperPositions: updatedPositions }, config.encryptionKey);
         }
         await recordPaperSale(value, sold, reason, triggerType);
-      } catch (error) { if (!isTransientQuoteError(error)) { s.consecutiveFailures = (s.consecutiveFailures || 0) + 1; saveSettings(config.adminId, s, config.encryptionKey); } console.error(`Close error ${value.id}: ${error.message}`); if (!isTransientQuoteError(error) && s.consecutiveFailures >= Number(s.maxConsecutiveFailures || 5)) { s.killSwitch = true; watcherManuallyEnabled = false; watcher.stop(); console.error('🛑 تم تفعيل قاطع الطوارئ'); } }
+      } catch (error) { console.error(`Close error ${value.id}: ${error.message}`); }
     }
   } catch (error) {
     monitorErrorsCount += 1;
