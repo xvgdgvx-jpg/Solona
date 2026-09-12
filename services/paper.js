@@ -188,7 +188,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
       }
       currentPosition.updatedAt = Date.now();
       savePositionsUnlocked(adminId, currentPositions, key);
-      return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature };
+      return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature, feeLamports: Number(swapResult.feeLamports || 0), feeSol: Number(swapResult.feeSol || 0) };
     }
 
     const value = await refreshSinglePosition({ jupiterUrl, position: { ...position, tokenAmountRaw: Math.floor(position.tokenAmountRaw * fraction), investedSol: position.investedSol * fraction } });

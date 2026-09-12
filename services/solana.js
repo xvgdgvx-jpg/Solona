@@ -114,7 +114,9 @@ async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, pri
     const conn = connection(rpcUrl);
     const signature = await conn.sendRawTransaction(transaction.serialize(), { maxRetries: 3, skipPreflight: false });
     await conn.confirmTransaction(signature, 'confirmed');
-    return { simulated: false, signature, wallet: wallet.publicKey.toBase58() };
+    const confirmed = await conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 });
+    const feeLamports = Number(confirmed?.meta?.fee || 0);
+    return { simulated: false, signature, wallet: wallet.publicKey.toBase58(), feeLamports, feeSol: feeLamports / 1e9 };
   } catch (error) {
     throw new Error(`فشل إرسال المعاملة: ${error.response?.data?.error || error.message}`);
   }
