@@ -79,7 +79,7 @@ const panelKeyboard = (s) => new InlineKeyboard()
   .text(s.killSwitch ? '▶️ إلغاء القاطع' : '🛑 قاطع الطوارئ', `panel:${s.killSwitch ? 'killoff' : 'killon'}`).row()
   .text('⚙️ الإعدادات', 'panel:settings').text('📋 التفاصيل', 'panel:details').row()
   .text('🔄 إعادة ضبط الرصيد', 'balance:confirm');
-const settingsKeyboard = () => new InlineKeyboard().text('حجم الصفقة', 'cfg:allocation').row().text('عدد الصفقات اليومية', 'cfg:daily').row().text('هدف الربح والبيع', 'cfg:profit').row().text('نمط حجم الصفقة', 'cfg:sizing').row().text('⚙️ تعديل الفلاتر', 'filters').row().text('تأكيد البدء', 'cfg:confirm').text('رجوع', 'panel:back');
+const settingsKeyboard = () => new InlineKeyboard().text('حجم الصفقة', 'cfg:allocation').row().text('عدد الصفقات اليومية', 'cfg:daily').row().text('هدف الربح والبيع', 'cfg:profit').row().text('نمط حجم الصفقة', 'cfg:sizing').row().text('⚙️ تعديل الفلاتر', 'filters').row().text('♻️ الإعدادات الافتراضية', 'settings:reset:confirm').row().text('تأكيد البدء', 'cfg:confirm').text('رجوع', 'panel:back');
 const pendingFilters = new Map();
 const filterLabels = { curve: '📉 نسبة المنحنى', ageMin: '⏱️ عمر العملة الأدنى', ageMax: '📅 عمر العملة الأقصى', volume: '💵 الحد الأدنى للحجم', allowZeroVolume: '📊 السماح بحجم صفر', buyers: '👥 الحد الأدنى للمشترين', dev: '👨‍💻 أقصى نسبة للمطور', top: '🐋 كبار الملاك', social: '🔗 روابط التواصل', authorities: '🔒 تأمين العقد والسيولة', liquidity: '💧 الحد الأدنى لسيولة SOL', dominance: '📊 تفوق الشراء على البيع', mcapMin: '🎯 الحد الأدنى للقيمة السوقية', marketcap: '🎯 سقف القيمة السوقية', watch: '⏱️ مدة المراقبة', sl: '🛑 وقف الخسارة', rugProtection: '🚨 حماية من الـ Rug', capitalProtection: '🛡️ حماية رأس المال', maxHoldTime: '⏰ البيع الزمني' };
 const filterValue = (s, field) => ({ curve: `${s.minCurveProgress}-${s.maxCurveProgress}%`, ageMin: Number(s.minTokenAgeSec) > 0 ? `${s.minTokenAgeSec} ثانية` : 'لا يهم', ageMax: Number(s.maxTokenAgeSec) > 0 ? `${s.maxTokenAgeSec} ثانية` : 'مفتوح', mcapMin: Number(s.minMarketCapUsd) > 0 ? `$${Number(s.minMarketCapUsd).toLocaleString()}` : 'مفتوح', volume: Number(s.minVolumeUsd) > 0 ? `$${s.minVolumeUsd}` : 'لا يهم', allowZeroVolume: s.allowZeroVolume ? `مفعل — سيولة ≥ ${s.allowZeroVolumeMinLiq} SOL` : 'معطل', buyers: Number(s.minUniqueBuyers) > 0 ? `${s.minUniqueBuyers} محافظ` : 'لا يهم', dev: `${s.maxCreatorHoldingsPct}%`, top: `${s.maxTopHoldersPct}%`, social: s.requireSocialLinks ? 'إلزامية' : 'غير إلزامية', watch: `${s.watchlistMinutes} دقائق`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'غير إلزامي', liquidity: s.minLiquiditySol ? `${s.minLiquiditySol} SOL` : 'لا يهم', dominance: s.requireBuyVolumeDominance ? 'مفعل' : 'معطل', marketcap: s.maxMarketCapUsd ? `$${s.maxMarketCapUsd}` : 'مفتوح', sl: `-${s.paperStopLossPct}%`, rugProtection: s.rugProtectionEnabled ? 'مفعل' : 'معطل', capitalProtection: s.capitalProtectionEnabled ? `مفعل — بيع ${s.capitalProtectionSellPct}% عند -${s.capitalProtectionTriggerPct}%` : 'معطل', maxHoldTime: Number(s.maxHoldTimeMin) > 0 ? `${s.maxHoldTimeMin} دقيقة` : 'غير مفعل' }[field]);
@@ -201,9 +201,24 @@ bot.command('settings', async (ctx) => {
   if (key === 'reset') {
     resetSettings(config.adminId, config.encryptionKey);
     const reset = settingsForAdmin();
+    watcherManuallyEnabled = Boolean(reset.autoSniperEnabled && !reset.killSwitch);
     watcher.updateSettings(reset);
-    if (reset.autoSniperEnabled) watcher.start(); else watcher.stop();
-    return ctx.reply('✅ تم مسح كل الإعدادات القديمة. الفلاتر الآن كلها معطلة.');
+    if (watcherManuallyEnabled) watcher.start(); else watcher.stop();
+    return ctx.reply(`✅ تمت إعادة الإعدادات الافتراضية بنجاح.
+
+المنحنى: ${reset.minCurveProgress}-${reset.maxCurveProgress}%
+العمر: ${reset.minTokenAgeSec}-${reset.maxTokenAgeSec} ثانية
+الحجم: لا يهم
+حجم صفر: مسموح مع سيولة ≥ ${reset.allowZeroVolumeMinLiq} SOL
+المشترون: لا يهم
+المطور: ≤ ${reset.maxCreatorHoldingsPct}%
+كبار الملاك: ≤ ${reset.maxTopHoldersPct}%
+السيولة: ≥ ${reset.minLiquiditySol} SOL
+القيمة السوقية: مفتوح - ${reset.maxMarketCapUsd}$
+المراقبة: ${reset.watchlistMinutes} دقائق
+وقف الخسارة: -${reset.paperStopLossPct}%
+
+يمكن تغيير أي قيمة من أزرار Telegram.`);
   }
   const s = settingsForAdmin();
   if (key) {
@@ -282,6 +297,8 @@ bot.callbackQuery('snipe', async (ctx) => { await ctx.answerCallbackQuery(); awa
 bot.callbackQuery('public:status', async (ctx) => { await ctx.answerCallbackQuery(); const status = watcher.status(); await ctx.reply(`حالة المراقب: ${status.running ? 'يعمل الآن' : 'متوقف'}\nالمصدر: ${status.source}\nآخر فحص: ${status.lastPollAt ? new Date(status.lastPollAt).toLocaleString('ar-IQ') : 'لم يبدأ بعد'}`); });
 bot.callbackQuery('public:help', async (ctx) => { await ctx.answerCallbackQuery(); await ctx.reply('هذا البوت يراقب فرص Pump.fun وفق فلاتر أمان محددة.\n\n/status — عرض حالة المراقب\n/start — فتح الواجهة العامة\n\nالتداول والإعدادات محمية للمشرف.'); });
 bot.callbackQuery('settings', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return ctx.reply('هذا القسم متاح للمشرف فقط.'); await ctx.reply(settingsText(settingsForAdmin())); });
+bot.callbackQuery('settings:reset:confirm', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; await ctx.editMessageText('⚠️ ستتم إعادة فلاتر القنص وقيم التشغيل إلى الإعدادات الافتراضية الظاهرة في القائمة، مع بقائها قابلة للتغيير لاحقاً من الأزرار. هل تريد المتابعة؟', { reply_markup: new InlineKeyboard().text('تأكيد الإعدادات الافتراضية ✅', 'settings:reset:do').row().text('إلغاء 🔙', 'panel:settings') }); });
+bot.callbackQuery('settings:reset:do', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; resetSettings(config.adminId, config.encryptionKey); const reset = settingsForAdmin(); watcherManuallyEnabled = Boolean(reset.autoSniperEnabled && !reset.killSwitch); watcher.updateSettings(reset); if (watcherManuallyEnabled) watcher.start(); else watcher.stop(); await ctx.editMessageText(`✅ تمت إعادة الإعدادات الافتراضية وتطبيقها فوراً.\n\n${filterText(reset)}\n\nيمكنك تعديل أي فلتر من الأزرار.`, { reply_markup: filterKeyboard(reset) }); });
 bot.callbackQuery('filters', async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; await ctx.editMessageText(filterText(settingsForAdmin()), { reply_markup: filterKeyboard(settingsForAdmin()) }); });
 bot.callbackQuery(/^filter:(curve|volume|buyers|dev|top|social|watch|authorities|liquidity|dominance|marketcap|ageMin|ageMax|mcapMin|sl|rugProtection|capitalProtection|maxHoldTime|allowZeroVolume)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const field = ctx.match[1]; const s = settingsForAdmin(); if (field === 'curve') { pendingFilters.set(String(ctx.from.id), { field, min: String(s.minCurveProgress), max: String(s.maxCurveProgress) }); return ctx.editMessageText(`${filterLabels.curve}\n\nالقيمة الحالية: ${filterValue(s, 'curve')}\n\nحدد الحد الأدنى أولاً:`, { reply_markup: curveMinKeyboard(String(s.minCurveProgress)) }); } const value = field === 'ageMin' ? String(s.minTokenAgeSec || 0) : field === 'ageMax' ? String(s.maxTokenAgeSec || 0) : field === 'mcapMin' ? String(s.minMarketCapUsd || 0) : field === 'sl' ? String(s.paperStopLossPct || 15) : field === 'rugProtection' ? (s.rugProtectionEnabled ? 'on' : 'off') : field === 'capitalProtection' ? (s.capitalProtectionEnabled ? `${s.capitalProtectionSellPct}-${s.capitalProtectionTriggerPct}` : 'off') : field === 'maxHoldTime' ? String(s.maxHoldTimeMin || 0) : field === 'volume' ? String(s.minVolumeUsd) : field === 'allowZeroVolume' ? (s.allowZeroVolume ? String(s.allowZeroVolumeMinLiq) : 'off') : field === 'buyers' ? String(s.minUniqueBuyers) : field === 'dev' ? String(s.maxCreatorHoldingsPct) : field === 'top' ? String(s.maxTopHoldersPct) : field === 'watch' ? String(s.watchlistMinutes) : field === 'social' ? (s.requireSocialLinks ? 'on' : 'off') : field === 'authorities' ? (s.requireRenouncedAuthorities ? 'on' : 'off') : field === 'dominance' ? (s.requireBuyVolumeDominance ? 'on' : 'off') : field === 'liquidity' ? String(s.minLiquiditySol || 0) : String(s.maxMarketCapUsd || 0); pendingFilters.set(String(ctx.from.id), { field, value }); await ctx.editMessageText(`${filterLabels[field]}\n\nالقيمة الحالية: ${filterValue(s, field)}\nاختر قيمة جديدة ثم اضغط تأكيد الاختيار.`, { reply_markup: optionKeyboard(field, value) }); });
 bot.callbackQuery(/^fmin:(0|1|5|10|15|20)$/, async (ctx) => { await ctx.answerCallbackQuery(); if (!isAdmin(ctx)) return; const pending = pendingFilters.get(String(ctx.from.id)) || { field: 'curve' }; pending.field = 'curve'; pending.min = ctx.match[1]; pendingFilters.set(String(ctx.from.id), pending); await ctx.editMessageText(`📉 نسبة المنحنى\n\nالحد الأدنى المختار: ${pending.min}%\n\nحدد الحد الأعلى:`, { reply_markup: curveMaxKeyboard(pending.min) }); });
