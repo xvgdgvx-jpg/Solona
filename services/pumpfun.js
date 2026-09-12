@@ -450,7 +450,9 @@ class PumpFunWatcher {
   }
 
   async evaluate(candidate) {
-    if (candidate.volumeUsd == null && Number(this.settings.minVolumeUsd ?? 0) > 0 && !this.filterReason(candidate, { skipVolume: true })) {
+    const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
+    const primaryVolumeMissingOrLow = candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd);
+    if (minVolumeUsd > 0 && primaryVolumeMissingOrLow && !this.filterReason(candidate, { skipVolume: true })) {
       const dex = await this.fetchDexScreenerVolume(candidate.mint);
       if (Number.isFinite(dex.volumeUsd)) Object.assign(candidate, dex);
     }
