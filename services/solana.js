@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { Connection, Keypair, PublicKey, VersionedTransaction } = require('@solana/web3.js');
+const { Connection, Keypair, PublicKey, VersionedTransaction, SystemProgram, Transaction } = require('@solana/web3.js');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 
@@ -136,6 +136,21 @@ async function checkSolReceived({ rpcUrl, signature, beforeSol, owner }) {
   return received;
 }
 
+async function sendSol({ rpcUrl, secret, destination, amountSol, liveTrading, priorityFeeLamports = 0 }) {
+  const wallet = keypairFromSecret(secret);
+  const recipient = new PublicKey(destination);
+  const lamports = Math.floor(Number(amountSol) * 1e9);
+  if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('مبلغ السحب يجب أن يكون أكبر من صفر.');
+  if (!liveTrading) return { simulated: true, wallet: wallet.publicKey.toBase58(), destination: recipient.toBase58(), amountSol: lamports / 1e9 };
+  const conn = connection(rpcUrl);
+  const balance = await conn.getBalance(wallet.publicKey, 'confirmed');
+  if (lamports >= balance) throw new Error('المبلغ يتجاوز الرصيد المتاح بعد احتساب رسوم الشبكة.');
+  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: recipient, lamports }));
+  const signature = await conn.sendTransaction(tx, [wallet], { maxRetries: 3, skipPreflight: false });
+  await conn.confirmTransaction(signature, 'confirmed');
+  return { simulated: false, signature, wallet: wallet.publicKey.toBase58(), destination: recipient.toBase58(), amountSol: lamports / 1e9 };
+}
+
 async function getPortfolio({ rpcUrl, secret }) {
   const wallet = keypairFromSecret(secret);
   try {
@@ -148,4 +163,4 @@ async function getPortfolio({ rpcUrl, secret }) {
   }
 }
 
-module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, getTokenBalance, executeSwap, getSolBalance, checkSolReceived, getPortfolio };
+module.exports = { SOL_MINT, keypairFromSecret, getQuote, getTokenAmount, getTokenBalance, executeSwap, getSolBalance, sendSol, checkSolReceived, getPortfolio };
