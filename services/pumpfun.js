@@ -40,7 +40,16 @@ class PumpFunWatcher {
   }
 
   updateSettings(settings) {
+    const previousMode = this.settings?.strategyMode;
     this.settings = settings;
+    if (previousMode && previousMode !== settings?.strategyMode) {
+      // A watchlist entry is source-specific. Never re-evaluate Pump.fun
+      // candidates with the DexScreener strategy (or the reverse).
+      this.watchlist.clear();
+      this.watchlistBusy = false;
+      this.seen.clear();
+      console.log(`[cycle] strategy changed ${previousMode} -> ${settings.strategyMode}; stale watchlist cleared`);
+    }
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -217,6 +226,7 @@ class PumpFunWatcher {
 
   async handleHeliusMint(event) {
     if (!this.running) return;
+    if (this.settings.strategyMode === 'growing') return;
     const coin = await this.fetchCoin(event.mint);
     if (!coin) return;
     this.seen.add(event.mint);
@@ -598,6 +608,11 @@ class PumpFunWatcher {
     }
     await this.ensureDexVolume(candidate);
     const reason = this.filterReason(candidate);
+    if (this.settings.strategyMode === 'growing' && candidate.marketDataSource !== 'dexscreener') {
+      const missingMarketData = '📡 بيانات DexScreener غير متاحة — تم التخطي دون قائمة مراقبة';
+      this.onFilter(candidate, missingMarketData);
+      return false;
+    }
     if (!reason) {
       this.watchlist.delete(candidate.mint);
       this.lastCandidate = candidate;
@@ -634,6 +649,11 @@ class PumpFunWatcher {
     }
 
     if (!this.running || !this.watchlist.size || this.watchlistBusy) return;
+    if (this.settings.strategyMode === 'growing') {
+      this.watchlist.clear();
+      console.log('[watchlist] stale Pump.fun entries cleared in growing strategy');
+      return;
+    }
     this.watchlistBusy = true;
 
     try {
