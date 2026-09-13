@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { getQuote, getTokenBalance, executeSwap, checkSolReceived, SOL_MINT, keypairFromSecret } = require('./solana');
+const { getQuote, getTokenBalance, getSolBalance, executeSwap, checkSolReceived, SOL_MINT, keypairFromSecret } = require('./solana');
 const { getUser, saveUser } = require('./storage');
 
 const getPositions = (adminId, key) => getUser(adminId, key).paperPositions || [];
