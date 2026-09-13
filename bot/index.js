@@ -3,6 +3,7 @@ const config = require('../config');
 const { getQuote, getTokenAmount, getTokenBalance, executeSwap, getPortfolio, getSolBalance, sendSol, SOL_MINT, keypairFromSecret } = require('../services/solana');
 const { getSettings, saveSettings, canTrade } = require('../services/settings');
 const { PumpFunWatcher } = require('../services/pumpfun');
+const { WhaleWatcher } = require('../services/whale');
 const { openPosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, cleanupStaleClosing } = require('../services/paper');
 const { getUser, saveUser, resetSettings } = require('../services/storage');
 const { startHealthServer, app } = require('../health-server');
@@ -204,6 +205,29 @@ bot.command(['start', 'menu'], dashboard);
 bot.command('panel', dashboard);
 bot.command('clean', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.'); const chatId = ctx.chat.id; const current = ctx.msg.message_id; for (let id = current; id > Math.max(0, current - 100); id -= 1) { try { await ctx.api.deleteMessage(chatId, id); } catch (_) {} } });
 bot.command('status', async (ctx) => { const s = settingsForAdmin(); const status = watcher.status(); const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).toLocaleString('ar-IQ') : 'لم تبدأ بعد'; const candidate = status.lastCandidate ? status.lastCandidate.symbol : 'لا توجد عملة مطابقة بعد'; await ctx.reply(`حالة مراقب Pump.fun\n\nالتشغيل: ${status.running ? 'يعمل الآن' : 'متوقف'}\nالمراقبة: ${s.autoSniperEnabled ? 'مفعّلة' : 'متوقفة'}\nآخر فحص: ${lastPoll}\nآخر مرشح مطابق: ${candidate}\nمصدر البيانات: ${status.source}\n\nللمستخدمين: هذا العرض للقراءة فقط.`); });
+bot.command('whale', async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply('هذا الأمر متاح للمشرف فقط.');
+  const [, action] = ctx.message.text.trim().split(/\s+/);
+  const s = settingsForAdmin();
+  if (!action || action === 'status') {
+    const status = whaleWatcher.status();
+    return ctx.reply(`مراقبة الحوت: ${status.running ? 'تعمل' : 'متوقفة'}\nالعنوان: ${status.wallet || 'غير مضبوط'}\nآخر فحص: ${status.lastPollAt || 'لم تبدأ'}\nآخر إشارة: ${status.lastSignal ? `${status.lastSignal.side} ${status.lastSignal.mint}` : 'لا توجد'}\nنسخ التداول: معطل دائمًا في هذه النسخة الآمنة.`);
+  }
+  if (action === 'on') {
+    if (!config.whaleWalletAddress) return ctx.reply('لا يوجد WHALE_WALLET_ADDRESS في إعدادات الخدمة.');
+    s.whaleMonitoringEnabled = true;
+    saveSettings(config.adminId, s, config.encryptionKey);
+    whaleWatcher.start();
+    return ctx.reply('✅ بدأت مراقبة الحوت قراءةً فقط. كل إشارة تمر بالفلاتر وتُسجل، ولا يتم نسخ أي شراء أو بيع.');
+  }
+  if (action === 'off') {
+    s.whaleMonitoringEnabled = false;
+    saveSettings(config.adminId, s, config.encryptionKey);
+    whaleWatcher.stop();
+    return ctx.reply('⏹️ تم إيقاف مراقبة الحوت.');
+  }
+  return ctx.reply('استخدم: /whale on أو /whale off أو /whale status');
+});
 bot.command('wallet', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('المحفظة الشخصية متاحة للمشرف فقط.'); try { const address = keypairFromSecret(userSecret()).publicKey.toBase58(); const sol = await getSolBalance({ rpcUrl: config.rpcUrl, owner: address }); await ctx.reply(`💼 محفظتك الشخصية\n\nالعنوان:\n${address}\n\nالرصيد: ${sol.toFixed(9)} SOL\nالعمولة: 0%\nالحد الأدنى للإيداع: لا يوجد\nالحد الأدنى للسحب: لا يوجد\n\nالإيداع: أرسل SOL إلى العنوان أعلاه.\nالسحب: استخدم زر سحب SOL أو /withdraw <العنوان> <المبلغ>.`, { reply_markup: walletKeyboard(address) }); } catch (e) { await ctx.reply(`تعذر تحميل المحفظة.\n${e.message}`); } });
 bot.command('portfolio', async (ctx) => { try { const p = await getPortfolio({ rpcUrl: config.rpcUrl, secret: userSecret() }); await ctx.reply(`المحفظة الاستثمارية\nالعنوان: ${shortAddress(p.address)}\nرصيد SOL: ${p.sol.toFixed(4)}\nحسابات العملات غير الفارغة: ${p.tokens.length}\n\nاضغط زر النسخ لنسخ العنوان الكامل.`, { reply_markup: copyAddressKeyboard('نسخ عنوان المحفظة', p.address) }); } catch (e) { await ctx.reply(`تعذر تحميل المحفظة الاستثمارية.\n${e.message}`); } });
 bot.command('withdraw', async (ctx) => { if (!isAdmin(ctx)) return ctx.reply('السحب متاح للمشرف فقط.'); const [, destination, amount] = ctx.message.text.trim().split(/\s+/); if (!destination || !amount) return ctx.reply('استخدم:\n/withdraw <عنوان Solana> <المبلغ SOL>\nلا يوجد حد أدنى للسحب.'); try { const result = await sendSol({ rpcUrl: config.rpcUrl, secret: userSecret(), destination, amountSol: amount, liveTrading: effectiveLiveTrading(settingsForAdmin()), priorityFeeLamports: config.priorityFeeMaxLamports }); if (result.simulated) return ctx.reply(`معاينة سحب فقط — التداول الحقيقي مغلق.\nإلى: ${result.destination}\nالمبلغ: ${result.amountSol} SOL\nلم تُرسل معاملة.`); await ctx.reply(`تم إرسال السحب بنجاح.\nالمبلغ: ${result.amountSol} SOL\n${explorer(result.signature)}`); } catch (e) { await ctx.reply(`تعذر تنفيذ السحب.\n${e.message}`); } });
@@ -405,6 +429,34 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   } catch (error) { const now = Date.now(); console.error(`Auto-sniper quote error: ${error.message}`); if (now - lastSniperErrorAt >= 600000) lastSniperErrorAt = now; }
   finally { sniperTradeBusy = false; }
 }});
+const whaleWatcher = new WhaleWatcher({
+  rpcUrl: config.heliusRpcUrl || config.rpcUrl,
+  wallet: config.whaleWalletAddress,
+  pollMs: config.whalePollMs,
+  onError: (error) => console.error(`[whale] ${error.message}`),
+  onSignal: async (signal) => {
+    if (signal.side !== 'buy') {
+      console.log(`[whale] sell signal observed for ${signal.mint}; no automatic action is enabled`);
+      return;
+    }
+    try {
+      const coin = await watcher.fetchCoin(signal.mint);
+      if (!coin) return console.warn(`[whale] ${signal.mint}: primary token data unavailable; signal rejected`);
+      const candidate = watcher.normalize(coin);
+      await watcher.ensureDexVolume(candidate);
+      const reason = watcher.filterReason(candidate);
+      const marketDataOk = candidate.marketDataSource === 'dexscreener';
+      if (reason || !marketDataOk) {
+        console.log(`[whale] buy signal rejected for ${signal.mint}: ${reason || 'DEX Screener data unavailable'}`);
+        return;
+      }
+      console.log(`[whale] buy signal passed filters for ${signal.mint}; copy trading remains disabled by safety default`);
+    } catch (error) {
+      console.error(`[whale] signal validation failed for ${signal.mint}: ${error.message}`);
+    }
+  },
+});
+if (config.whaleWalletAddress && settingsForAdmin().whaleMonitoringEnabled) whaleWatcher.start();
 const watcherStart = watcher.start.bind(watcher);
 watcher.start = () => {
   if (!watcherManuallyEnabled) {

@@ -59,6 +59,10 @@ const defaults = {
   maxTokenAgeSec: 600,
   watchlistMinutes: 10,
 
+  // ── مراقبة الحوت: إشارات فقط، دون نسخ تداول افتراضيًا ──
+  whaleMonitoringEnabled: false,
+  whaleCopyTradingEnabled: false,
+
   // ── الحالة ──
   lastMint: null,
   lastFilterResult: 'لم يبدأ الفحص بعد',

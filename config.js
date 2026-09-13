@@ -55,5 +55,7 @@ module.exports = {
   heliusApiKey: process.env.HELIUS_API_KEY || '',
   heliusRpcUrl: process.env.HELIUS_RPC_URL || '',
   heliusWsUrl: process.env.HELIUS_WS_URL || '',
+  whaleWalletAddress: process.env.WHALE_WALLET_ADDRESS || '',
+  whalePollMs: Number(process.env.WHALE_POLL_MS || 5000),
   priorityFeeMaxLamports: Number(process.env.PRIORITY_FEE_MAX_LAMPORTS || 500000)
 };
