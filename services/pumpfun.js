@@ -22,6 +22,9 @@ class PumpFunWatcher {
     this.lastCandidate = null;
     this.lastError = null;
     this.source = process.env.PUMPFUN_API_URL || DEFAULT_URLS[0];
+    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
+    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
+    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
     this.heliusFailures = 0;
     this.helius = new HeliusService({
       apiKey: process.env.HELIUS_API_KEY,
@@ -118,6 +121,18 @@ class PumpFunWatcher {
         priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
         dexScreenerBuys: Number(pair.txns?.h24?.buys || 0),
         dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
+        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
+        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
+        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
+        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
+        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
+        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
+        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
+        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
+        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
+        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
+        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
+        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
         dexScreenerPair: pair.pairAddress || null,
         dexScreenerDex: pair.dexId || null,
         dexScreenerUpdatedAt: Date.now(),
@@ -130,6 +145,41 @@ class PumpFunWatcher {
       return empty;
     }
   }
+
+
+  async scanGrowingListings() {
+    const { data } = await axios.get(process.env.DEX_DISCOVERY_URL || this.dexDiscoveryUrl, { timeout: 8000 });
+    const profiles = Array.isArray(data) ? data : (data?.profiles || data?.data || []);
+    const solanaProfiles = profiles.filter((item) => String(item.chainId).toLowerCase() === 'solana' && item.tokenAddress);
+    for (const profile of solanaProfiles.slice(0, 20)) {
+      const mint = profile.tokenAddress;
+      if (this.seen.has(`dex:${mint}`)) continue;
+      this.seen.add(`dex:${mint}`);
+      const dex = await this.fetchDexScreenerData(mint);
+      if (!dex.marketDataSource) continue;
+      const candidate = this.normalizeDex(mint, profile, dex);
+      candidate.source = 'dexscreener-latest-listings';
+      await this.evaluate(candidate);
+    }
+  }
+
+  normalizeDex(mint, profile, dex) {
+    return {
+      mint, name: dex.name || profile.description || '', symbol: dex.symbol || 'N/A', decimals: 6,
+      marketCapUsd: Number.isFinite(dex.marketCapUsd) ? dex.marketCapUsd : null,
+      liquiditySol: null, liquidityUsd: Number.isFinite(dex.liquidityUsd) ? dex.liquidityUsd : null,
+      volumeUsd: Number.isFinite(dex.volumeUsd) ? dex.volumeUsd : null,
+      buyVolumeUsd: null, sellVolumeUsd: null, uniqueBuyers: Number.isFinite(dex.dexScreenerBuys) ? dex.dexScreenerBuys : null,
+      uniqueSellers: Number.isFinite(dex.dexScreenerSells) ? dex.dexScreenerSells : null,
+      dexBuys: dex.dexScreenerBuys, dexSells: dex.dexScreenerSells, buySellRatio: dex.buySellRatio,
+      priceChange1hPct: dex.priceChange1hPct, previousCurveProgress: null, creatorSold: null,
+      bondingCurveProgress: 100, bondingCurveProgressSource: 'dex-listed', mintAuthority: null, freezeAuthority: null,
+      creator: null, bondingCurve: null, socialLinks: [], createdAt: dex.pairCreatedAt ? dex.pairCreatedAt / 1000 : null,
+      marketDataSource: 'dexscreener', dexScreenerPair: dex.dexScreenerPair, dexScreenerDex: dex.dexScreenerDex,
+      profileUrl: profile.url || null,
+    };
+  }
+
 
   async fetchCoin(mint) {
     const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
@@ -173,6 +223,11 @@ class PumpFunWatcher {
     while (this.running && generation === this.loopGeneration) {
       try {
         this.lastPollAt = new Date().toISOString();
+        if (this.settings.strategyMode === 'growing') {
+          await this.scanGrowingListings();
+          await sleep(Math.max(10000, Number(process.env.DEX_DISCOVERY_POLL_MS || 30000)));
+          continue;
+        }
         const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
         let response;
         let lastError;
@@ -324,6 +379,7 @@ class PumpFunWatcher {
     try { new PublicKey(candidate.mint); } catch { return 'عنوان Mint غير صالح'; }
 
     const s = this.settings;
+    const growing = s.strategyMode === 'growing';
 
     if (!candidate.name) return 'اسم العملة فارغ';
 
@@ -331,11 +387,11 @@ class PumpFunWatcher {
       return 'رابط تواصل مفقود';
     }
 
-    if (s.requireRenouncedAuthorities && (candidate.mintAuthority || candidate.freezeAuthority)) {
+    if (!growing && s.requireRenouncedAuthorities && (candidate.mintAuthority || candidate.freezeAuthority)) {
       return 'Mint/Freeze Authority غير معطلة';
     }
 
-    if (s.maxCurveProgress > 0 || s.minCurveProgress > 0) {
+    if (!growing && (s.maxCurveProgress > 0 || s.minCurveProgress > 0)) {
       const hasRealCurveData = candidate.bondingCurveProgressSource !== 'unavailable' &&
                                 candidate.bondingCurveProgressSource !== 'fallback-zero';
       if (hasRealCurveData) {
@@ -381,13 +437,30 @@ class PumpFunWatcher {
     }
 
     if (s.requireBuyVolumeDominance) {
-      if (candidate.buyVolumeUsd == null || candidate.sellVolumeUsd == null) {
-        return '📊 بيانات الشراء/البيع غير معروفة';
-      }
-      if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) {
-        return `📊 شراء $${candidate.buyVolumeUsd.toFixed(0)} ≤ بيع $${candidate.sellVolumeUsd.toFixed(0)}`;
+      if (growing && Number.isFinite(candidate.buySellRatio)) {
+        if (candidate.buySellRatio <= 1) return `📊 مشتريات Dex ليست أعلى من المبيعات`;
+      } else {
+        if (candidate.buyVolumeUsd == null || candidate.sellVolumeUsd == null) {
+          return '📊 بيانات الشراء/البيع غير معروفة';
+        }
+        if (candidate.buyVolumeUsd <= candidate.sellVolumeUsd) {
+          return `📊 شراء $${candidate.buyVolumeUsd.toFixed(0)} ≤ بيع $${candidate.sellVolumeUsd.toFixed(0)}`;
+        }
       }
     }
+
+    const minLiqUsd = Number(s.minLiquidityUsd ?? 0);
+    if (growing && minLiqUsd > 0) {
+      if (!Number.isFinite(candidate.liquidityUsd) || candidate.liquidityUsd < minLiqUsd) return `💧 سيولة $${Number(candidate.liquidityUsd || 0).toFixed(0)} أقل من $${minLiqUsd}`;
+    }
+
+    const minDexBuys = Number(s.minDexBuys ?? 0);
+    if (growing && minDexBuys > 0 && (!Number.isFinite(candidate.dexBuys) || candidate.dexBuys < minDexBuys)) return `📈 مشتريات Dex ${Number(candidate.dexBuys || 0)} أقل من ${minDexBuys}`;
+    const minRatio = Number(s.minBuySellRatio ?? 0);
+    if (growing && minRatio > 0 && (!Number.isFinite(candidate.buySellRatio) || candidate.buySellRatio < minRatio)) return `📊 نسبة الشراء/البيع ${Number(candidate.buySellRatio || 0).toFixed(2)} أقل من ${minRatio}`;
+    const minChange = Number(s.minPriceChange1hPct ?? 0);
+    if (growing && minChange > 0 && (!Number.isFinite(candidate.priceChange1hPct) || candidate.priceChange1hPct < minChange)) return `🚀 تغير الساعة ${Number(candidate.priceChange1hPct || 0).toFixed(1)}% أقل من ${minChange}%`;
+
 
     const minLiq = Number(s.minLiquiditySol ?? 0);
     if (minLiq > 0) {
@@ -456,12 +529,11 @@ class PumpFunWatcher {
   }
 
   hasCompleteTradeData(candidate) {
-    const core = Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd >= 0
+    const core = (this.settings.strategyMode === 'growing' || Number.isFinite(candidate.volumeUsd)) && Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd >= 0
       && Number.isFinite(candidate.liquiditySol) && candidate.liquiditySol > 0
       && Number.isFinite(candidate.marketCapUsd) && candidate.marketCapUsd > 0
       && Number.isFinite(candidate.createdAt) && candidate.createdAt > 0
-      && Number.isFinite(candidate.bondingCurveProgress)
-      && !['unavailable', 'fallback-zero'].includes(candidate.bondingCurveProgressSource);
+      && (this.settings.strategyMode === 'growing' || (Number.isFinite(candidate.bondingCurveProgress) && !['unavailable', 'fallback-zero'].includes(candidate.bondingCurveProgressSource)));
     const holderData = candidate.heliusVerified === true
       && Number.isFinite(candidate.creatorHoldingsPct)
       && Number.isFinite(candidate.topHoldersPct);

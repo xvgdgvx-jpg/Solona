@@ -5,6 +5,7 @@ const defaults = {
   autoSniperEnabled: false,
   paperTradingEnabled: true,
   autoSellEnabled: true,
+  strategyMode: 'new',
 
   // ── رأس المال ──
   paperCapitalSol: 3,
@@ -58,6 +59,11 @@ const defaults = {
   minTokenAgeSec: 30,
   maxTokenAgeSec: 600,
   watchlistMinutes: 10,
+  minLiquidityUsd: 0,
+  minDexBuys: 0,
+  minBuySellRatio: 0,
+  minPriceChange1hPct: 0,
+  filterProfiles: { new: null, growing: null },
 
   // ── الحالة ──
   lastMint: null,
