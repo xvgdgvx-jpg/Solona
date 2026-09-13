@@ -60,7 +60,7 @@ const defaults = {
   watchlistMinutes: 10,
 
   // ── مراقبة الحوت: إشارات فقط، دون نسخ تداول افتراضيًا ──
-  whaleMonitoringEnabled: false,
+  whaleMonitoringEnabled: true,
   whaleCopyTradingEnabled: false,
 
   // ── الحالة ──
