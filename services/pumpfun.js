@@ -482,8 +482,10 @@ class PumpFunWatcher {
     if (growing && minChange > 0 && (!Number.isFinite(candidate.priceChange1hPct) || candidate.priceChange1hPct < minChange)) return `🚀 تغير الساعة ${Number(candidate.priceChange1hPct || 0).toFixed(1)}% أقل من ${minChange}%`;
 
 
+    // Pump.fun newborns use bonding-curve liquidity in SOL. DexScreener
+    // listings use pair liquidity in USD and must not inherit this check.
     const minLiq = Number(s.minLiquiditySol ?? 0);
-    if (minLiq > 0) {
+    if (!growing && minLiq > 0) {
       if (!Number.isFinite(candidate.liquiditySol) || candidate.liquiditySol <= 0) {
         return '💧 سيولة غير معروفة — رفض احترازي';
       }
@@ -525,7 +527,7 @@ class PumpFunWatcher {
         }
       }
 
-      if (candidate.liquiditySol > 0 && candidate.liquiditySol < 20) {
+      if (!growing && candidate.liquiditySol > 0 && candidate.liquiditySol < 20) {
         return `🚨 سيولة منخفضة: ${candidate.liquiditySol.toFixed(1)} SOL`;
       }
 
@@ -549,11 +551,15 @@ class PumpFunWatcher {
   }
 
   hasCompleteTradeData(candidate) {
-    const core = (this.settings.strategyMode === 'growing' || Number.isFinite(candidate.volumeUsd)) && Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd >= 0
-      && Number.isFinite(candidate.liquiditySol) && candidate.liquiditySol > 0
+    const growing = this.settings.strategyMode === 'growing';
+    const liquidityComplete = growing
+      ? Number.isFinite(candidate.liquidityUsd) && candidate.liquidityUsd > 0
+      : Number.isFinite(candidate.liquiditySol) && candidate.liquiditySol > 0;
+    const core = Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd >= 0
+      && liquidityComplete
       && Number.isFinite(candidate.marketCapUsd) && candidate.marketCapUsd > 0
       && Number.isFinite(candidate.createdAt) && candidate.createdAt > 0
-      && (this.settings.strategyMode === 'growing' || (Number.isFinite(candidate.bondingCurveProgress) && !['unavailable', 'fallback-zero'].includes(candidate.bondingCurveProgressSource)));
+      && (growing || (Number.isFinite(candidate.bondingCurveProgress) && !['unavailable', 'fallback-zero'].includes(candidate.bondingCurveProgressSource)));
     const holderData = candidate.heliusVerified === true
       && Number.isFinite(candidate.creatorHoldingsPct)
       && Number.isFinite(candidate.topHoldersPct);
