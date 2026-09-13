@@ -37,6 +37,10 @@ class HeliusService {
     this.subscriptionId = null;
     this.stopped = true;
     this.statsCache = new Map();
+    this.rpcBackoffUntil = 0;
+    this.lastRpcRequestAt = 0;
+    this.rpcBackoffUntil = 0;
+    this.lastRpcRequestAt = 0;
   }
 
   enabled() { return Boolean(this.apiKey && this.rpcUrl && this.wsUrl); }
@@ -166,9 +170,31 @@ class HeliusService {
 
   async rpc(method, params) {
     if (!this.rpcUrl) throw new Error('HELIUS_API_KEY غير مضبوط');
-    const { data } = await axios.post(this.rpcUrl, { jsonrpc: '2.0', id: Date.now(), method, params }, { timeout: 10000 });
-    if (data.error) throw new Error(data.error.message || `${method} failed`);
-    return data.result;
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const minInterval = Math.max(100, Number(process.env.HELIUS_MIN_INTERVAL_MS || 150));
+      const wait = Math.max(0, minInterval - (Date.now() - this.lastRpcRequestAt), this.rpcBackoffUntil - Date.now());
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      this.lastRpcRequestAt = Date.now();
+      try {
+        const { data } = await axios.post(this.rpcUrl, { jsonrpc: '2.0', id: Date.now(), method, params }, { timeout: 10000 });
+        if (data.error) {
+          const error = new Error(data.error.message || `${method} failed`);
+          error.response = { status: data.error.code === -32005 ? 429 : 400 };
+          throw error;
+        }
+        return data.result;
+      } catch (error) {
+        lastError = error;
+        const status = error.response?.status;
+        if (![429, 500, 502, 503, 504].includes(status) || attempt === 2) break;
+        const retryAfter = Number(error.response?.headers?.['retry-after'] || 0);
+        const backoff = Math.min(15000, Math.max(1000, retryAfter * 1000 || (attempt + 1) * 1500));
+        this.rpcBackoffUntil = Date.now() + backoff;
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+    throw lastError;
   }
 
   async getAsset(id) { return this.rpc('getAsset', { id, displayOptions: { showFungible: true, showInscription: false } }); }
@@ -179,8 +205,11 @@ class HeliusService {
     if (cached && Date.now() - cached.at < 30000) return cached.value;
     try {
       const signatures = await this.rpc('getSignaturesForAddress', [bondingCurve, { limit: 40, commitment: 'confirmed' }]);
-      const usable = (signatures || []).filter((item) => !item.err).slice(0, 20);
-      const transactions = await Promise.all(usable.map((item) => this.rpc('getTransaction', [item.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null)));
+      const usable = (signatures || []).filter((item) => !item.err).slice(0, 8);
+      const transactions = [];
+      for (const item of usable) {
+        transactions.push(await this.rpc('getTransaction', [item.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null));
+      }
       const buyers = new Set();
       const sellers = new Set();
       for (const tx of transactions) {

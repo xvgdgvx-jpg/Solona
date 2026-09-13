@@ -22,9 +22,7 @@ class PumpFunWatcher {
     this.lastCandidate = null;
     this.lastError = null;
     this.source = process.env.PUMPFUN_API_URL || DEFAULT_URLS[0];
-    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
-    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
-    this.dexDiscoveryUrl = 'https://api.dexscreener.com/token-profiles/latest/v1';
+    this.dexDiscoveryUrl = process.env.DEX_DISCOVERY_URL || 'https://api.dexscreener.com/token-profiles/latest/v1';
     this.heliusFailures = 0;
     this.helius = new HeliusService({
       apiKey: process.env.HELIUS_API_KEY,
@@ -36,6 +34,15 @@ class PumpFunWatcher {
     });
     this.streamMode = false;
     this.dexCache = new Map();
+    this.dexInFlight = new Map();
+    this.lastDexRequestAt = 0;
+    this.dexBackoffUntil = 0;
+    this.dexInFlight = new Map();
+    this.lastDexRequestAt = 0;
+    this.dexBackoffUntil = 0;
+    this.dexInFlight = new Map();
+    this.lastDexRequestAt = 0;
+    this.dexBackoffUntil = 0;
   }
 
   updateSettings(settings) {
@@ -103,49 +110,61 @@ class PumpFunWatcher {
   }
 
   async fetchDexScreenerData(mint) {
+    if (!mint) return {};
+    const now = Date.now();
     const cached = this.dexCache.get(mint);
-    if (cached && Date.now() - cached.at < 30000) return cached.value;
-    const empty = {};
-    try {
-      const { data } = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 5000 });
-      const pairs = Array.isArray(data?.pairs)
-        ? data.pairs.filter((pair) => String(pair.chainId).toLowerCase() === 'solana')
-        : [];
-      const pair = pairs
-        .filter((item) => Number.isFinite(Number(item?.volume?.h24)) || Number.isFinite(Number(item?.marketCap)) || Number.isFinite(Number(item?.fdv)))
-        .sort((a, b) => Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0))[0];
-      const value = pair ? {
-        volumeUsd: Number.isFinite(Number(pair.volume?.h24)) ? Number(pair.volume.h24) : null,
-        marketCapUsd: Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : (Number.isFinite(Number(pair.fdv)) ? Number(pair.fdv) : null),
-        liquidityUsd: Number.isFinite(Number(pair.liquidity?.usd)) ? Number(pair.liquidity.usd) : null,
-        priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
-        dexScreenerBuys: Number(pair.txns?.h24?.buys || 0),
-        dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
-        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
-        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
-        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
-        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
-        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
-        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
-        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
-        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
-        buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns?.h24?.buys || 0) / Number(pair.txns?.h24?.sells || 0) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
-        priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
-        pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
-        name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
-        dexScreenerPair: pair.pairAddress || null,
-        dexScreenerDex: pair.dexId || null,
-        dexScreenerUpdatedAt: Date.now(),
-        marketDataSource: 'dexscreener',
-      } : empty;
-      this.dexCache.set(mint, { at: Date.now(), value });
-      return value;
-    } catch (error) {
-      this.dexCache.set(mint, { at: Date.now(), value: empty });
-      return empty;
-    }
-  }
+    const cacheTtl = Math.max(15000, Number(process.env.DEX_CACHE_TTL_MS || 30000));
+    if (cached && now - cached.at < cacheTtl) return cached.value;
+    if (this.dexInFlight.has(mint)) return this.dexInFlight.get(mint);
 
+    const request = (async () => {
+      const empty = {};
+      try {
+        const minInterval = Math.max(250, Number(process.env.DEX_MIN_INTERVAL_MS || 500));
+        const wait = Math.max(0, minInterval - (Date.now() - this.lastDexRequestAt), this.dexBackoffUntil - Date.now());
+        if (wait) await sleep(wait);
+        this.lastDexRequestAt = Date.now();
+        const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 5000 });
+        const pairs = Array.isArray(response.data?.pairs)
+          ? response.data.pairs.filter((pair) => String(pair.chainId).toLowerCase() === 'solana')
+          : [];
+        const pair = pairs
+          .filter((item) => Number.isFinite(Number(item?.volume?.h24)) || Number.isFinite(Number(item?.marketCap)) || Number.isFinite(Number(item?.fdv)))
+          .sort((a, b) => Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0))[0];
+        const value = pair ? {
+          volumeUsd: Number.isFinite(Number(pair.volume?.h24)) ? Number(pair.volume.h24) : null,
+          marketCapUsd: Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : (Number.isFinite(Number(pair.fdv)) ? Number(pair.fdv) : null),
+          liquidityUsd: Number.isFinite(Number(pair.liquidity?.usd)) ? Number(pair.liquidity.usd) : null,
+          priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
+          dexScreenerBuys: Number(pair.txns?.h24?.buys || 0),
+          dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
+          buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns.h24.sells) / Number(pair.txns.h24.buys || 1) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
+          priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
+          pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
+          name: pair.baseToken?.name || '',
+          symbol: pair.baseToken?.symbol || '',
+          dexScreenerPair: pair.pairAddress || null,
+          dexScreenerDex: pair.dexId || null,
+          dexScreenerUpdatedAt: Date.now(),
+          marketDataSource: 'dexscreener',
+        } : empty;
+        this.dexCache.set(mint, { at: Date.now(), value });
+        return value;
+      } catch (error) {
+        if (error.response?.status === 429) {
+          const retryAfter = Number(error.response.headers?.['retry-after'] || 0);
+          this.dexBackoffUntil = Date.now() + Math.min(15000, Math.max(2000, retryAfter * 1000 || 3000));
+        }
+        this.dexCache.set(mint, { at: Date.now(), value: empty });
+        console.warn(`[dexscreener] ${mint}: ${error.message}`);
+        return empty;
+      } finally {
+        this.dexInFlight.delete(mint);
+      }
+    })();
+    this.dexInFlight.set(mint, request);
+    return request;
+  }
 
   async scanGrowingListings() {
     const { data } = await axios.get(process.env.DEX_DISCOVERY_URL || this.dexDiscoveryUrl, { timeout: 8000 });

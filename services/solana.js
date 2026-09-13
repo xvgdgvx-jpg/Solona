@@ -58,7 +58,7 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
         return data;
       } catch (error) {
         lastError = error;
-        if (error.response?.status !== 429 || attempt === 2) break;
+        if (![429, 500, 502, 503, 504].includes(error.response?.status) || attempt === 2) break;
         const retryAfter = Number(error.response.headers?.['retry-after'] || 0);
         const backoff = Math.min(15000, Math.max(2000, retryAfter * 1000 || (attempt + 1) * 2500));
         jupiterBackoffUntil = Date.now() + backoff;
