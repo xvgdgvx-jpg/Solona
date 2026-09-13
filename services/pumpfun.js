@@ -455,6 +455,19 @@ class PumpFunWatcher {
     return null;
   }
 
+  hasCompleteTradeData(candidate) {
+    const core = Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd >= 0
+      && Number.isFinite(candidate.liquiditySol) && candidate.liquiditySol > 0
+      && Number.isFinite(candidate.marketCapUsd) && candidate.marketCapUsd > 0
+      && Number.isFinite(candidate.createdAt) && candidate.createdAt > 0
+      && Number.isFinite(candidate.bondingCurveProgress)
+      && !['unavailable', 'fallback-zero'].includes(candidate.bondingCurveProgressSource);
+    const holderData = candidate.heliusVerified === true
+      && Number.isFinite(candidate.creatorHoldingsPct)
+      && Number.isFinite(candidate.topHoldersPct);
+    return core && holderData;
+  }
+
   async ensureDexVolume(candidate) {
     const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
     const needsVolumeCheck = minVolumeUsd > 0 && (candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd));
@@ -473,6 +486,13 @@ class PumpFunWatcher {
   }
 
   async evaluate(candidate) {
+    if (!candidate.heliusVerified && candidate.mint) {
+      try {
+        Object.assign(candidate, await this.helius.enrichToken(candidate.mint, candidate.creator, candidate.bondingCurve));
+      } catch (error) {
+        this.lastError = `Helius enrichment: ${error.message}`;
+      }
+    }
     await this.ensureDexVolume(candidate);
     const reason = this.filterReason(candidate);
     if (!reason) {
