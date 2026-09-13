@@ -477,9 +477,11 @@ setInterval(() => {
 // paper-only unless LIVE_TRADING=true and live mode is explicitly enabled.
 const bootSettings = settingsForAdmin();
 bootSettings.autoSniperEnabled = false;
+bootSettings.whaleMonitoringEnabled = true;
 watcherManuallyEnabled = false;
 watcher.updateSettings(bootSettings);
 saveSettings(config.adminId, bootSettings, config.encryptionKey);
+if (config.whaleWalletAddress) whaleWatcher.start();
 console.log('[startup] Watcher kept stopped; use the Telegram تشغيل button to start it explicitly');
 let monitorErrorsCount = 0;
 let monitorBackoffOnce = false;
