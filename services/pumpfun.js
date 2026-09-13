@@ -169,19 +169,62 @@ class PumpFunWatcher {
     return request;
   }
 
+  async fetchDexScreenerBatchData(mints) {
+    const unique = [...new Set(mints.filter(Boolean))];
+    if (!unique.length) return new Map();
+    const result = new Map();
+    try {
+      const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${unique.join(',')}`, { timeout: 5000 });
+      for (const pair of (response.data?.pairs || [])) {
+        if (String(pair.chainId).toLowerCase() !== 'solana') continue;
+        const mint = pair.baseToken?.address;
+        if (!mint) continue;
+        const existing = result.get(mint);
+        const currentVolume = Number(pair.volume?.h24 || 0);
+        if (existing && currentVolume <= Number(existing.volumeUsd || 0)) continue;
+        const value = {
+          volumeUsd: Number.isFinite(Number(pair.volume?.h24)) ? Number(pair.volume.h24) : null,
+          marketCapUsd: Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : (Number.isFinite(Number(pair.fdv)) ? Number(pair.fdv) : null),
+          liquidityUsd: Number.isFinite(Number(pair.liquidity?.usd)) ? Number(pair.liquidity.usd) : null,
+          priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
+          dexScreenerBuys: Number(pair.txns?.h24?.buys || 0), dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
+          buySellRatio: Number(pair.txns?.h24?.buys || 0) > 0 ? Number(pair.txns.h24.buys) / Number(pair.txns.h24.sells || 1) : 0,
+          priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
+          pairCreatedAt: Number(pair.pairCreatedAt || 0) || null, name: pair.baseToken?.name || '', symbol: pair.baseToken?.symbol || '',
+          dexScreenerPair: pair.pairAddress || null, dexScreenerDex: pair.dexId || null, dexScreenerUpdatedAt: Date.now(), marketDataSource: 'dexscreener',
+        };
+        result.set(mint, value);
+        this.dexCache.set(mint, { at: Date.now(), value });
+      }
+    } catch (error) {
+      console.warn(`[dexscreener] batch ${unique.length}: ${error.message}`);
+    }
+    return result;
+  }
+
   async scanGrowingListings() {
     const { data } = await axios.get(process.env.DEX_DISCOVERY_URL || this.dexDiscoveryUrl, { timeout: 8000 });
     const profiles = Array.isArray(data) ? data : (data?.profiles || data?.data || []);
     const solanaProfiles = profiles.filter((item) => String(item.chainId).toLowerCase() === 'solana' && item.tokenAddress);
-    for (const profile of solanaProfiles.slice(0, 20)) {
-      const mint = profile.tokenAddress;
-      if (this.seen.has(`dex:${mint}`)) continue;
-      this.seen.add(`dex:${mint}`);
-      const dex = await this.fetchDexScreenerData(mint);
-      if (!dex.marketDataSource) continue;
-      const candidate = this.normalizeDex(mint, profile, dex);
-      candidate.source = 'dexscreener-latest-listings';
-      await this.evaluate(candidate);
+    const pending = solanaProfiles.slice(0, 20).filter((profile) => {
+      const key = `dex:${profile.tokenAddress}`;
+      if (this.seen.has(key)) return false;
+      this.seen.add(key);
+      return true;
+    });
+    // Keep discovery responsive without opening 20 upstream requests at once.
+    const batchSize = Math.max(2, Math.min(30, Number(process.env.DEX_SCAN_BATCH_SIZE || 20)));
+    for (let offset = 0; offset < pending.length; offset += batchSize) {
+      const batch = pending.slice(offset, offset + batchSize);
+      const data = await this.fetchDexScreenerBatchData(batch.map((profile) => profile.tokenAddress));
+      await Promise.all(batch.map(async (profile) => {
+        const mint = profile.tokenAddress;
+        const dex = data.get(mint) || {};
+        if (!dex.marketDataSource) return;
+        const candidate = this.normalizeDex(mint, profile, dex);
+        candidate.source = 'dexscreener-latest-listings';
+        await this.evaluate(candidate);
+      }));
     }
   }
 
@@ -198,6 +241,7 @@ class PumpFunWatcher {
       bondingCurveProgress: 100, bondingCurveProgressSource: 'dex-listed', mintAuthority: null, freezeAuthority: null,
       creator: null, bondingCurve: null, socialLinks: [], createdAt: dex.pairCreatedAt ? dex.pairCreatedAt / 1000 : null,
       marketDataSource: 'dexscreener', dexScreenerPair: dex.dexScreenerPair, dexScreenerDex: dex.dexScreenerDex,
+      dexScreenerUpdatedAt: dex.dexScreenerUpdatedAt || Date.now(),
       profileUrl: profile.url || null,
     };
   }
@@ -577,9 +621,13 @@ class PumpFunWatcher {
   }
 
   async ensureDexVolume(candidate) {
-    const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
-    const needsVolumeCheck = minVolumeUsd > 0 && (candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd));
-    const needsMarketData = candidate.marketDataSource !== 'dexscreener';
+    const minVolumeUsd = Number(this.settings.minVolumeUsd || 0);
+    const dexFresh = candidate.marketDataSource === 'dexscreener'
+      && Number.isFinite(candidate.volumeUsd)
+      && Number.isFinite(candidate.liquidityUsd)
+      && (Date.now() - Number(candidate.dexScreenerUpdatedAt || 0) < 60000);
+    const needsVolumeCheck = !dexFresh && minVolumeUsd > 0 && (candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd));
+    const needsMarketData = !dexFresh && candidate.marketDataSource !== 'dexscreener';
     const allowsUnknownVolume = this.settings.strategyMode !== 'growing'
       && this.settings.allowZeroVolume === true
       && Number.isFinite(candidate.liquiditySol)
