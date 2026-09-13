@@ -346,8 +346,11 @@ class PumpFunWatcher {
         return v == null ? null : Number(v);
       })(),
       liquiditySol: (() => {
-        const v = coin.liquidity_sol ?? coin.sol_reserves;
-        if (v != null) return Number(v);
+        const v = coin.liquidity_sol ?? coin.virtual_sol_reserves ?? coin.virtualSolReserves ?? coin.sol_reserves ?? coin.real_sol_reserves;
+        if (v != null) {
+          const n = Number(v);
+          return Number.isFinite(n) ? (Math.abs(n) > 1e6 ? n / 1e9 : n) : null;
+        }
         const virtual = Number(coin.virtual_sol_reserves ?? coin.virtualSolReserves ?? 0);
         return virtual > 0 ? virtual / 1e9 : null;
       })(),
@@ -423,7 +426,11 @@ class PumpFunWatcher {
     const minVol = Number(s.minVolumeUsd ?? 0);
     if (minVol > 0 && !options.skipVolume) {
       if (candidate.volumeUsd == null) {
-        return '📊 حجم غير معروف — رفض احترازي';
+        const minLiquidityForZeroVolume = Number(s.allowZeroVolumeMinLiq ?? 0);
+        const allowsUnknownVolume = !growing && s.allowZeroVolume === true
+          && Number.isFinite(candidate.liquiditySol)
+          && candidate.liquiditySol >= minLiquidityForZeroVolume;
+        if (!allowsUnknownVolume) return '📊 حجم غير معروف — رفض احترازي';
       } else if (candidate.volumeUsd < minVol) {
         return `📊 حجم $${candidate.volumeUsd.toFixed(0)} أقل من $${minVol}`;
       }
@@ -557,6 +564,11 @@ class PumpFunWatcher {
     const minVolumeUsd = Number(this.settings.minVolumeUsd ?? 0);
     const needsVolumeCheck = minVolumeUsd > 0 && (candidate.volumeUsd == null || (Number.isFinite(candidate.volumeUsd) && candidate.volumeUsd < minVolumeUsd));
     const needsMarketData = candidate.marketDataSource !== 'dexscreener';
+    const allowsUnknownVolume = this.settings.strategyMode !== 'growing'
+      && this.settings.allowZeroVolume === true
+      && Number.isFinite(candidate.liquiditySol)
+      && candidate.liquiditySol >= Number(this.settings.allowZeroVolumeMinLiq ?? 0);
+    if (allowsUnknownVolume && !needsMarketData) return { attempted: false, found: false };
     if ((!needsVolumeCheck && !needsMarketData) || this.filterReason(candidate, { skipVolume: true })) return { attempted: false, found: false };
     const dex = await this.fetchDexScreenerData(candidate.mint);
     if (dex.marketDataSource) {
