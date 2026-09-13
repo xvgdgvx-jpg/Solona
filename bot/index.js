@@ -96,8 +96,8 @@ const growingProfileDefaults = { minCurveProgress: 0, maxCurveProgress: 100, min
 const profileSnapshot = (s) => Object.fromEntries(strategyProfileFields.map((key) => [key, s[key]]));
 const applyStrategyMode = (s, mode) => { const profiles = { ...(s.filterProfiles || {}) }; profiles[s.strategyMode || 'new'] = profileSnapshot(s); const target = profiles[mode] || (mode === 'growing' ? growingProfileDefaults : newbornProfileDefaults); Object.assign(s, target); s.filterProfiles = { ...profiles, [mode]: profileSnapshot({ ...s, ...target }) }; s.strategyMode = mode; return s; };
 const modeLabels = { new: '🆕 صيد عملات مولودة حديثًا', growing: '📈 صيد عملات نامية مدرجة' };
-const filterLabels = { curve: '📉 نسبة المنحنى', ageMin: '⏱️ عمر العملة الأدنى', ageMax: '📅 عمر العملة الأقصى', volume: '💵 الحد الأدنى للحجم', allowZeroVolume: '📊 السماح بحجم صفر', buyers: '👥 الحد الأدنى للمشترين', dev: '👨‍💻 أقصى نسبة للمطور', top: '🐋 كبار الملاك', social: '🔗 روابط التواصل', authorities: '🔒 تأمين العقد والسيولة', liquidity: '💧 الحد الأدنى لسيولة SOL', dominance: '📊 تفوق الشراء على البيع', minLiqUsd: '💧 سيولة Dex الدنيا', dexBuys: '📈 مشتريات Dex الدنيا', ratio: '⚖️ نسبة الشراء/البيع', momentum: '🚀 زخم الساعة', minLiqUsd: '💧 سيولة Dex الدنيا', dexBuys: '📈 مشتريات Dex الدنيا', ratio: '⚖️ نسبة الشراء/البيع', momentum: '🚀 زخم الساعة', mcapMin: '🎯 الحد الأدنى للقيمة السوقية', marketcap: '🎯 سقف القيمة السوقية', watch: '⏱️ مدة المراقبة', sl: '🛑 وقف الخسارة', rugProtection: '🚨 حماية من الـ Rug', capitalProtection: '🛡️ حماية رأس المال', maxHoldTime: '⏰ البيع الزمني' };
-const filterValue = (s, field) => ({ curve: `${s.minCurveProgress}-${s.maxCurveProgress}%`, ageMin: Number(s.minTokenAgeSec) > 0 ? `${s.minTokenAgeSec} ثانية` : 'لا يهم', ageMax: Number(s.maxTokenAgeSec) > 0 ? `${s.maxTokenAgeSec} ثانية` : 'مفتوح', mcapMin: Number(s.minMarketCapUsd) > 0 ? `$${Number(s.minMarketCapUsd).toLocaleString()}` : 'مفتوح', volume: Number(s.minVolumeUsd) > 0 ? `$${s.minVolumeUsd}` : 'لا يهم', allowZeroVolume: s.allowZeroVolume ? `مفعل — سيولة ≥ ${s.allowZeroVolumeMinLiq} SOL` : 'معطل', buyers: Number(s.minUniqueBuyers) > 0 ? `${s.minUniqueBuyers} محافظ` : 'لا يهم', dev: `${s.maxCreatorHoldingsPct}%`, top: `${s.maxTopHoldersPct}%`, social: s.requireSocialLinks ? 'إلزامية' : 'غير إلزامية', watch: `${s.watchlistMinutes} دقائق`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'غير إلزامي', liquidity: s.minLiquiditySol ? `${s.minLiquiditySol} SOL` : 'لا يهم', dominance: s.requireBuyVolumeDominance ? 'مفعل' : 'معطل', minLiqUsd: s.minLiquidityUsd ? `$${s.minLiquidityUsd}` : 'لا يهم', dexBuys: s.minDexBuys ? `${s.minDexBuys} عملية` : 'لا يهم', ratio: s.minBuySellRatio ? `${s.minBuySellRatio}x` : 'لا يهم', momentum: s.minPriceChange1hPct ? `+${s.minPriceChange1hPct}%` : 'لا يهم', minLiqUsd: s.minLiquidityUsd ? `$${s.minLiquidityUsd}` : 'لا يهم', dexBuys: s.minDexBuys ? `${s.minDexBuys} عملية` : 'لا يهم', ratio: s.minBuySellRatio ? `${s.minBuySellRatio}x` : 'لا يهم', momentum: s.minPriceChange1hPct ? `+${s.minPriceChange1hPct}%` : 'لا يهم', marketcap: s.maxMarketCapUsd ? `$${s.maxMarketCapUsd}` : 'مفتوح', sl: `-${s.paperStopLossPct}%`, rugProtection: s.rugProtectionEnabled ? 'مفعل' : 'معطل', capitalProtection: s.capitalProtectionEnabled ? `مفعل — بيع ${s.capitalProtectionSellPct}% عند -${s.capitalProtectionTriggerPct}%` : 'معطل', maxHoldTime: Number(s.maxHoldTimeMin) > 0 ? `${s.maxHoldTimeMin} دقيقة` : 'غير مفعل' }[field]);
+const filterLabels = { curve: '📉 نسبة المنحنى', ageMin: '⏱️ عمر العملة الأدنى', ageMax: '📅 عمر العملة الأقصى', volume: '💵 الحد الأدنى للحجم', allowZeroVolume: '📊 السماح بحجم صفر', buyers: '👥 الحد الأدنى للمشترين', dev: '👨‍💻 أقصى نسبة للمطور', top: '🐋 كبار الملاك', social: '🔗 روابط التواصل', authorities: '🔒 تأمين العقد والسيولة', liquidity: '💧 الحد الأدنى لسيولة SOL', dominance: '📊 تفوق الشراء على البيع', minLiqUsd: '💧 سيولة Dex الدنيا', dexBuys: '📈 مشتريات Dex الدنيا', ratio: '⚖️ نسبة الشراء/البيع', momentum: '🚀 زخم الساعة', mcapMin: '🎯 الحد الأدنى للقيمة السوقية', marketcap: '🎯 سقف القيمة السوقية', watch: '⏱️ مدة المراقبة', sl: '🛑 وقف الخسارة', rugProtection: '🚨 حماية من الـ Rug', capitalProtection: '🛡️ حماية رأس المال', maxHoldTime: '⏰ البيع الزمني' };
+const filterValue = (s, field) => ({ curve: `${s.minCurveProgress}-${s.maxCurveProgress}%`, ageMin: Number(s.minTokenAgeSec) > 0 ? `${s.minTokenAgeSec} ثانية` : 'لا يهم', ageMax: Number(s.maxTokenAgeSec) > 0 ? `${s.maxTokenAgeSec} ثانية` : 'مفتوح', mcapMin: Number(s.minMarketCapUsd) > 0 ? `$${Number(s.minMarketCapUsd).toLocaleString()}` : 'مفتوح', volume: Number(s.minVolumeUsd) > 0 ? `$${s.minVolumeUsd}` : 'لا يهم', allowZeroVolume: s.allowZeroVolume ? `مفعل — سيولة ≥ ${s.allowZeroVolumeMinLiq} SOL` : 'معطل', buyers: Number(s.minUniqueBuyers) > 0 ? `${s.minUniqueBuyers} محافظ` : 'لا يهم', dev: `${s.maxCreatorHoldingsPct}%`, top: `${s.maxTopHoldersPct}%`, social: s.requireSocialLinks ? 'إلزامية' : 'غير إلزامية', watch: `${s.watchlistMinutes} دقائق`, authorities: s.requireRenouncedAuthorities ? 'إلزامي' : 'غير إلزامي', liquidity: s.minLiquiditySol ? `${s.minLiquiditySol} SOL` : 'لا يهم', dominance: s.requireBuyVolumeDominance ? 'مفعل' : 'معطل', minLiqUsd: s.minLiquidityUsd ? `$${s.minLiquidityUsd}` : 'لا يهم', dexBuys: s.minDexBuys ? `${s.minDexBuys} عملية` : 'لا يهم', ratio: s.minBuySellRatio ? `${s.minBuySellRatio}x` : 'لا يهم', momentum: s.minPriceChange1hPct ? `+${s.minPriceChange1hPct}%` : 'لا يهم', marketcap: s.maxMarketCapUsd ? `$${s.maxMarketCapUsd}` : 'مفتوح', sl: `-${s.paperStopLossPct}%`, rugProtection: s.rugProtectionEnabled ? 'مفعل' : 'معطل', capitalProtection: s.capitalProtectionEnabled ? `مفعل — بيع ${s.capitalProtectionSellPct}% عند -${s.capitalProtectionTriggerPct}%` : 'معطل', maxHoldTime: Number(s.maxHoldTimeMin) > 0 ? `${s.maxHoldTimeMin} دقيقة` : 'غير مفعل' }[field]);
 const newbornFilterFields = ['curve','ageMin','ageMax','volume','allowZeroVolume','buyers','dev','top','social','authorities','liquidity','dominance','mcapMin','minLiqUsd','dexBuys','ratio','momentum','marketcap','watch','sl','rugProtection','capitalProtection','maxHoldTime'];
 const growingFilterFields = ['ageMin','ageMax','volume','buyers','dev','top','dominance','minLiqUsd','dexBuys','ratio','mcapMin','marketcap','watch','sl','rugProtection','capitalProtection','maxHoldTime'];
 const filterFieldsFor = (s) => (s.strategyMode === 'growing' ? growingFilterFields : newbornFilterFields);
@@ -346,7 +346,10 @@ async function trade(ctx, side, mintArg, amountArg, fraction = null) {
     }
     if (!effectiveLiveTrading(s)) {
       if (side === 'buy') {
+        if (Number(s.paperAvailableSol) < amount) return ctx.reply('الرصيد التجريبي المتاح غير كافٍ لهذه الصفقة.');
         const position = await openPosition({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl, mint, investedSol: amount, quote });
+        s.paperAvailableSol = Number(s.paperAvailableSol) - amount;
+        saveSettings(config.adminId, s, config.encryptionKey);
         const current = await refreshPositions({ adminId: config.adminId, key: config.encryptionKey, jupiterUrl: config.jupiterUrl });
         const value = current.values.find((p) => p.id === position.id);
         if (!value || value.pricingError) return ctx.reply(`تم تسجيل الشراء التجريبي، لكن لا يوجد Route للبيع حالياً.\nالعنوان: ${mint}\nسيتمكن البوت من حساب PnL عند توفر السيولة.\nلم تُرسل أي معاملة.`);
@@ -355,6 +358,7 @@ async function trade(ctx, side, mintArg, amountArg, fraction = null) {
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.mint === mint && p.status === 'open');
       if (!position) return ctx.reply('لا يوجد مركز Paper Trading مفتوح لهذه العملة.');
       const closed = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: position.id, fraction: fraction === null ? 1 : fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: userSecret() });
+      await recordPaperSale(position, closed, 'بيع يدوي من أمر Telegram', 'Manual');
       return ctx.reply(`تمت محاكاة البيع بنسبة ${Math.round((fraction || 1) * 100)}٪\nالقيمة: ${closed.currentSol.toFixed(6)} SOL\nالربح/الخسارة: ${closed.pnlSol >= 0 ? '+' : ''}${closed.pnlSol.toFixed(6)} SOL (${closed.pnlPct.toFixed(2)}٪)\nلم تُرسل أي معاملة.`);
     }
     const result = await executeSwap({ rpcUrl: config.rpcUrl, jupiterUrl: config.jupiterUrl, secret: userSecret(), quote, liveTrading: effectiveLiveTrading(s), priorityFeeMaxLamports: config.priorityFeeMaxLamports });
@@ -430,13 +434,15 @@ const watcher = new PumpFunWatcher({ adminId: config.adminId, settings: settings
   if (!s.autoSniperEnabled) return;
   if (sniperTradeBusy) { console.log(`[sniper] تخطي مرشح أثناء تنفيذ صفقة أخرى: ${candidate.mint}`); return; }
   if (!canTrade(s)) return;
-  if (!s.paperTradingEnabled) return;
+  if (!effectiveLiveTrading(s) && !s.paperTradingEnabled) return;
   sniperTradeBusy = true;
   try {
     const walletAddress = keypairFromSecret(userSecret()).publicKey.toBase58();
     lastRealBalanceSol = await getSolBalance({ rpcUrl: config.rpcUrl, owner: walletAddress });
-    const amountSol = Math.max(0, lastRealBalanceSol) * Number(s.paperAllocationPct || 0) / 100;
-    if (!effectiveLiveTrading(s) && (amountSol <= 0 || Number(s.paperAvailableSol) < amountSol)) return;
+    const amountSol = effectiveLiveTrading(s)
+      ? Math.max(0, lastRealBalanceSol) * Number(s.paperAllocationPct || 0) / 100
+      : Math.max(0, Number(s.paperAvailableSol || 0)) * Number(s.paperAllocationPct || 0) / 100;
+    if (amountSol <= 0 || (!effectiveLiveTrading(s) && Number(s.paperAvailableSol) < amountSol)) return;
     if (effectiveLiveTrading(s)) {
       await watcher.ensureDexVolume(candidate);
       const liveFilterReason = watcher.filterReason(candidate);
@@ -532,10 +538,10 @@ async function monitorPaperPositions() {
     for (const value of values) {
       if (value.pricingError) {
         console.warn(`[monitor] تعذر تسعير ${value.mint}: ${value.pricingError} — استمرار المراقبة`);
-        return;
+        continue;
       }
       const position = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
-      if (!position || position.status !== 'open') return;
+      if (!position || position.status !== 'open') continue;
       const stopLoss = Number(s.paperStopLossPct || 15);
       const firstTarget = Number(s.paperTakeProfitFirstPct || 30);
       const finalTarget = Number(s.paperTakeProfitFinalPct || 60);
@@ -573,12 +579,12 @@ async function monitorPaperPositions() {
         triggerType = 'TP1';
         reason = `جني الربح الأول +${firstTarget}% — بيع 50٪`;
       }
-      if (!fraction) return;
+      if (!fraction) continue;
       const positionBeforeClose = getPositions(config.adminId, config.encryptionKey).find((p) => p.id === value.id);
-      if (!positionBeforeClose || positionBeforeClose.status !== 'open') return;
+      if (!positionBeforeClose || positionBeforeClose.status !== 'open') continue;
       try {
         const sold = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: value.id, fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: userSecret() });
-        if (!sold) return;
+        if (!sold) continue;
         resetConsecutiveFailures(s);
         if (capitalProtection) {
           const user = getUser(config.adminId, config.encryptionKey);

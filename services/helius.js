@@ -39,8 +39,6 @@ class HeliusService {
     this.statsCache = new Map();
     this.rpcBackoffUntil = 0;
     this.lastRpcRequestAt = 0;
-    this.rpcBackoffUntil = 0;
-    this.lastRpcRequestAt = 0;
   }
 
   enabled() { return Boolean(this.apiKey && this.rpcUrl && this.wsUrl); }
@@ -161,9 +159,19 @@ class HeliusService {
       const result = payload.params?.result;
       const logs = result?.transaction?.meta?.logMessages || [];
       if (!result || !logs.some((log) => log.includes('Instruction: InitializeMint2'))) return;
-      const keys = result.transaction?.transaction?.message?.accountKeys || [];
+      const transaction = result.transaction?.transaction;
+      const message = transaction?.message || {};
+      const keys = message.accountKeys || [];
       const pubkeys = keys.map((key) => typeof key === 'string' ? key : key.pubkey).filter(Boolean);
-      const mint = pubkeys.find((key) => key.length >= 32 && key !== PUMP_PROGRAM_ID);
+      const instructions = [
+        ...(message.instructions || []),
+        ...((result.transaction?.meta?.innerInstructions || []).flatMap((group) => group.instructions || [])),
+      ];
+      const mintFromInstruction = instructions.find((instruction) => {
+        const type = instruction.parsed?.type || instruction.type || '';
+        return /initializemint/i.test(type) && instruction.parsed?.info?.mint;
+      })?.parsed?.info?.mint;
+      const mint = mintFromInstruction || pubkeys.find((key) => key.length >= 32 && key !== PUMP_PROGRAM_ID);
       if (mint) this.onMint({ mint, creator: pubkeys[0], signature: result.signature, source: 'helius-websocket' });
     } catch (error) { this.reportError(error); }
   }

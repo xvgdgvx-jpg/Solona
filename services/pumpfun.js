@@ -37,12 +37,6 @@ class PumpFunWatcher {
     this.dexInFlight = new Map();
     this.lastDexRequestAt = 0;
     this.dexBackoffUntil = 0;
-    this.dexInFlight = new Map();
-    this.lastDexRequestAt = 0;
-    this.dexBackoffUntil = 0;
-    this.dexInFlight = new Map();
-    this.lastDexRequestAt = 0;
-    this.dexBackoffUntil = 0;
   }
 
   updateSettings(settings) {
@@ -138,7 +132,7 @@ class PumpFunWatcher {
           priceUsd: Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null,
           dexScreenerBuys: Number(pair.txns?.h24?.buys || 0),
           dexScreenerSells: Number(pair.txns?.h24?.sells || 0),
-          buySellRatio: Number(pair.txns?.h24?.sells || 0) > 0 ? Number(pair.txns.h24.sells) / Number(pair.txns.h24.buys || 1) : Number(pair.txns?.h24?.buys || 0) > 0 ? 999 : 0,
+          buySellRatio: Number(pair.txns?.h24?.buys || 0) > 0 ? Number(pair.txns.h24.buys) / Number(pair.txns.h24.sells || 1) : 0,
           priceChange1hPct: Number.isFinite(Number(pair.priceChange?.h1)) ? Number(pair.priceChange.h1) : null,
           pairCreatedAt: Number(pair.pairCreatedAt || 0) || null,
           name: pair.baseToken?.name || '',
@@ -348,7 +342,7 @@ class PumpFunWatcher {
       symbol: coin.symbol || 'N/A',
       decimals: Number(coin.decimals ?? 6),
       marketCapUsd: (() => {
-        const v = coin.market_cap ?? coin.usd_market_cap;
+        const v = coin.usd_market_cap ?? coin.usdMarketCap ?? coin.market_cap_usd ?? coin.marketCapUsd;
         return v == null ? null : Number(v);
       })(),
       liquiditySol: (() => {

@@ -163,7 +163,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
       const balance = await getTokenBalance({ rpcUrl, ownerSecret, mint: position.mint });
       const requested = Math.floor(position.tokenAmountRaw * fraction);
       if (balance.raw < requested) throw new Error('الرصيد الفعلي أقل من الكمية المطلوبة.');
-      const amountToSell = Math.floor(balance.raw * fraction);
+      const amountToSell = requested;
       const beforeSol = await getSolBalance({ rpcUrl, owner: wallet.publicKey.toBase58() });
       const quote = await getQuote({ jupiterUrl, inputMint: position.mint, outputMint: SOL_MINT, amountLamports: amountToSell, slippageBps: 100 });
       const swapResult = await executeSwap({ rpcUrl, jupiterUrl, secret: ownerSecret, quote, liveTrading: true });
