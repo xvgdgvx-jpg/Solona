@@ -179,7 +179,10 @@ class PumpFunWatcher {
     if (!unique.length) return new Map();
     const result = new Map();
     try {
-      const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${unique.join(',')}`, { timeout: 5000 });
+      const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${unique.join(',')}`, {
+        timeout: 5000,
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
       for (const pair of (response.data?.pairs || [])) {
         if (String(pair.chainId).toLowerCase() !== 'solana') continue;
         const mint = pair.baseToken?.address;
@@ -297,7 +300,7 @@ class PumpFunWatcher {
         this.lastPollAt = new Date().toISOString();
         if (this.settings.strategyMode === 'growing') {
           await this.scanGrowingListings();
-          await sleep(Math.max(10000, Number(process.env.DEX_DISCOVERY_POLL_MS || 30000)));
+          await sleep(Math.max(3000, Number(process.env.DEX_DISCOVERY_POLL_MS || 5000)));
           continue;
         }
         const urls = process.env.PUMPFUN_API_URL ? [process.env.PUMPFUN_API_URL] : DEFAULT_URLS;
