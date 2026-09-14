@@ -6,7 +6,7 @@ class DexWatcher {
   constructor({ settings, onCandidate, onError, onFilter }) {
     this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
     this.running = false; this.timer = null; this.watchdog = null; this.lastPollAt = null; this.lastError = null;
-    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.discoveryUrl = process.env.DEX_DISCOVERY_URL || 'https://api.dexscreener.com/token-profiles/latest/v1';
+    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.discoveryUrl = process.env.DEX_DISCOVERY_URL || 'https://api.dexscreener.com/token-profiles/latest/v1';
   }
   updateSettings(settings) { this.settings = settings; }
   start() {
@@ -17,18 +17,20 @@ class DexWatcher {
     return true;
   }
   stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); this.timer = this.watchdog = null; }
-  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; }
-  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, source: 'DexScreener' }; }
+  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.lastPollAt = null; this.lastPollDurationMs = null; }
+  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, seen: this.seen.size, source: 'DexScreener' }; }
   async request(url, options = {}) { try { return (await axios.get(url, { timeout: 8000, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options })).data; } catch (error) { this.lastError = error.message; this.onError(error); return null; } }
   async poll() {
-    if (!this.running) return;
-    this.lastPollAt = Date.now();
+    if (!this.running || this.pollInFlight) return;
+    this.pollInFlight = true;
+    const startedAt = Date.now();
+    this.lastPollAt = startedAt;
     try {
       const data = await this.request(this.discoveryUrl);
       const profiles = Array.isArray(data) ? data : (data?.profiles || data?.data || []);
       const candidates = profiles.filter((x) => String(x.chainId).toLowerCase() === 'solana' && x.tokenAddress).slice(0, 50);
       for (const profile of candidates) { const mint = profile.tokenAddress; if (this.seen.has(mint)) continue; this.seen.add(mint); const candidate = await this.loadCandidate(mint, profile); if (candidate) await this.evaluate(candidate); }
-    } catch (error) { this.lastError = error.message; this.onError(error); }
+    } catch (error) { this.lastError = error.message; this.onError(error); } finally { this.lastPollDurationMs = Date.now() - startedAt; this.pollInFlight = false; }
   }
   async loadCandidate(mint, profile) {
     try {

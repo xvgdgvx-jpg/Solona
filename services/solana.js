@@ -5,7 +5,23 @@ const bs58 = bs58Module.default || bs58Module;
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const connection = (rpcUrl) => new Connection(rpcUrl, 'confirmed');
+const rpcConnections = new Map();
+function rpcUrls(primary) {
+  return [...new Set([primary, process.env.SOLANA_RPC_FALLBACK_URL, 'https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com'].filter(Boolean))];
+}
+function connection(rpcUrl) {
+  const url = rpcUrls(rpcUrl)[0];
+  if (!rpcConnections.has(url)) rpcConnections.set(url, new Connection(url, 'confirmed'));
+  return rpcConnections.get(url);
+}
+async function withRpcFallback(rpcUrl, operation) {
+  let lastError;
+  for (const url of rpcUrls(rpcUrl)) {
+    try { return await operation(connection(url)); }
+    catch (error) { lastError = error; if (!/429|max usage|rate.?limit|too many/i.test(String(error?.message || ''))) throw error; }
+  }
+  throw lastError;
+}
 let lastQuoteAt = 0;
 let jupiterBackoffUntil = 0;
 let quoteQueue = Promise.resolve();
@@ -124,7 +140,7 @@ async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, pri
 
 async function getSolBalance({ rpcUrl, owner }) {
   const publicKey = owner instanceof PublicKey ? owner : new PublicKey(owner);
-  return (await connection(rpcUrl).getBalance(publicKey, 'confirmed')) / 1e9;
+  return (await withRpcFallback(rpcUrl, (conn) => conn.getBalance(publicKey, 'confirmed'))) / 1e9;
 }
 
 async function checkSolReceived({ rpcUrl, signature, beforeSol, owner }) {
@@ -156,10 +172,11 @@ async function sendSol({ rpcUrl, secret, destination, amountSol, liveTrading, pr
 async function getPortfolio({ rpcUrl, secret }) {
   const wallet = keypairFromSecret(secret);
   try {
-    const conn = connection(rpcUrl);
-    const balance = await conn.getBalance(wallet.publicKey);
-    const tokens = await conn.getParsedTokenAccountsByOwner(wallet.publicKey, { programId: TOKEN_PROGRAM_ID });
-    return { address: wallet.publicKey.toBase58(), sol: balance / 1e9, tokens: tokens.value.map(({ account }) => account.data.parsed.info.tokenAmount).filter((x) => Number(x.uiAmount) > 0) };
+    return await withRpcFallback(rpcUrl, async (conn) => {
+      const balance = await conn.getBalance(wallet.publicKey);
+      const tokens = await conn.getParsedTokenAccountsByOwner(wallet.publicKey, { programId: TOKEN_PROGRAM_ID });
+      return { address: wallet.publicKey.toBase58(), sol: balance / 1e9, tokens: tokens.value.map(({ account }) => account.data.parsed.info.tokenAmount).filter((x) => Number(x.uiAmount) > 0) };
+    });
   } catch (error) {
     throw new Error(`تعذر الاتصال بشبكة Solana: ${error.message}`);
   }
