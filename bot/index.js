@@ -492,14 +492,20 @@ setInterval(() => {
   const lastPoll = status.lastPollAt ? new Date(status.lastPollAt).getTime() : Date.now();
   if (!status.streamMode && Date.now() - lastPoll > 120000) { console.log('[watchdog] Watcher stalled > 2min — restarting'); watcher.stop(); setTimeout(() => watcher.start(), 2000); }
 }, 60000);
-// Restore the persisted watcher state after a process restart. Trading remains
-// paper-only unless LIVE_TRADING=true and live mode is explicitly enabled.
+// Restore the watcher after a process restart. Real trading remains separately
+// guarded by effectiveLiveTrading/LIVE_TRADING and is never enabled here.
 const bootSettings = settingsForAdmin();
-bootSettings.autoSniperEnabled = false;
-watcherManuallyEnabled = false;
+const autoStartWatcher = process.env.AUTO_START_WATCHER !== 'false' && !bootSettings.killSwitch;
+bootSettings.autoSniperEnabled = autoStartWatcher;
+watcherManuallyEnabled = autoStartWatcher;
 watcher.updateSettings(bootSettings);
 saveSettings(config.adminId, bootSettings, config.encryptionKey);
-console.log('[startup] Watcher kept stopped; use the Telegram تشغيل button to start it explicitly');
+if (autoStartWatcher) {
+  setTimeout(() => watcher.start(), 1000);
+  console.log('[startup] Watcher auto-start scheduled; live trading remains separately disabled');
+} else {
+  console.log('[startup] Watcher kept stopped because kill switch is active or AUTO_START_WATCHER=false');
+}
 let monitorErrorsCount = 0;
 let monitorBackoffOnce = false;
 let monitorQueued = false;
