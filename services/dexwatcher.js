@@ -8,7 +8,7 @@ class DexWatcher {
     this.running = false; this.timer = null; this.watchdog = null; this.lastPollAt = null; this.lastError = null;
     this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.pollInFlight = false; this.lastPollDurationMs = null;
     this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
-    this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0;
+    this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null;
   }
   updateSettings(settings) { this.settings = settings; }
   start() {
@@ -23,16 +23,29 @@ class DexWatcher {
   status() { return { running: this.running, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, seen: this.seen.size, source: 'DexPaprika' }; }
   async request(url, options = {}) {
     try { return (await axios.get(url, { timeout: 10000, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options })).data; }
-    catch (error) { this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null; }
+    catch (error) { this.lastRequestStatus = error.response?.status || null; this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null; }
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
     this.pollInFlight = true; const startedAt = Date.now(); this.lastPollAt = startedAt;
     try {
-      const data = await this.request(this.discoveryUrl, { params: { order_by: 'volume_usd_24h', sort: 'desc', limit: 50 } });
+      const createdAfter = Math.floor(Date.now() / 1000) - 3600;
+      const params = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true, created_after: createdAfter };
+      this.lastRequestStatus = null;
+      let data = await this.request(this.discoveryUrl, { params });
+      if (!data && this.lastRequestStatus === 400) {
+        console.warn('[dexwatcher] DexPaprika rejected order_by — check API docs');
+        this.lastRequestStatus = null;
+        data = await this.request(this.discoveryUrl, { params: { ...params, order_by: 'price_change_percentage_5m' } });
+      }
       if (!data) { this.nextAllowedPollAt = Date.now() + 60000; return; }
       const pools = Array.isArray(data) ? data : (data?.results || data?.pools || data?.data || []);
-      for (const pool of pools) { const candidate = this.loadCandidate(pool); if (!candidate || this.seen.has(candidate.mint)) continue; this.seen.add(candidate.mint); await this.evaluate(candidate); }
+      for (const pool of pools) {
+        const candidate = this.loadCandidate(pool);
+        if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || candidate.volumeUsd <= 0 || this.seen.has(candidate.mint)) continue;
+        this.seen.add(candidate.mint);
+        await this.evaluate(candidate);
+      }
     } catch (error) { this.lastError = error.message; this.onError(error); }
     finally { this.lastPollDurationMs = Date.now() - startedAt; this.pollInFlight = false; }
   }
@@ -41,8 +54,9 @@ class DexWatcher {
       const token = Array.isArray(pool.tokens) ? pool.tokens[0] : null; const mint = token?.id;
       if (!mint) return null;
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
-      const created = pool.created_at ? Date.parse(pool.created_at) / 1000 : null;
-      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+      const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
+      const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
