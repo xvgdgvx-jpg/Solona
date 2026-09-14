@@ -57,5 +57,8 @@ bot.callbackQuery('mode:paper', async (ctx) => { await ctx.answerCallbackQuery()
 bot.callbackQuery(/^choose:(dex|goplus|tracker|risk):(.+)$/, async (ctx) => { await ctx.answerCallbackQuery(); const section = ctx.match[1]; const key = ctx.match[2]; const options = choices[`${section}:${key}`] || [[true,'مفعّل'],[false,'معطّل']]; const k = new InlineKeyboard(); for (const [value,label] of options) k.text(label, `set:${section}:${key}:${String(value)}`).row(); k.text('🔙 إلغاء', `filters:${section}`); await show(ctx, `اختر قيمة ${key}:`, k); });
 bot.callbackQuery(/^set:(dex|goplus|tracker|risk):([^:]+):(.+)$/, async (ctx) => { await ctx.answerCallbackQuery('تم الحفظ'); const [,section,key,raw] = ctx.match; const s = settings(); s[section][key] = raw === 'true' ? true : raw === 'false' ? false : Number.isNaN(Number(raw)) ? raw : Number(raw); await save(s); watcher.updateSettings(s); await show(ctx, section === 'dex' ? '📊 فلاتر DexScreener' : section === 'goplus' ? '🛡️ فلاتر GoPlus' : section === 'tracker' ? '🛡️ فلاتر Solana Tracker' : '🛑 إدارة المخاطر', screen(section, s)); });
 bot.catch((e) => console.error(`[telegram] ${e.message || e}`));
-const boot = settings(); watcher.updateSettings(boot); if (boot.autoWatcherEnabled && !boot.killSwitch) watcher.start();
+const boot = settings();
+if (process.env.AUTO_START_WATCHER !== 'false' && !boot.killSwitch) boot.autoWatcherEnabled = true;
+watcher.updateSettings(boot);
+if (boot.autoWatcherEnabled && !boot.killSwitch) { save(boot); watcher.start(); console.log(`[watcher] auto-started on boot; status=${JSON.stringify(watcher.status())}`); }
 module.exports = bot; module.exports.startWatcher = () => { const s = settings(); s.autoWatcherEnabled = true; save(s); watcher.updateSettings(s); return watcher.start(); }; module.exports.watcher = watcher;
