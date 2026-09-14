@@ -19,5 +19,7 @@ app.get('/watcher-status', (_req, res) => {
 });
 app.get('/ping', (_req, res) => res.status(200).send('pong'));
 app.get('/cron-ping', (_req, res) => res.status(200).json({ status: 'awake', ts: Date.now(), uptime: process.uptime() }));
-function startHealthServer() { if (server) return server; global.START_TIME = new Date().toISOString(); server = app.listen(PORT, () => console.log(`Health server listening on ${PORT}`)); return server; }
+let heartbeatTimer = null;
+function startHeartbeat() { if (heartbeatTimer) return; const base = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || ''; if (!base) return; heartbeatTimer = setInterval(() => { fetch(`${base.replace(/\/$/, '')}/cron-ping`).catch(() => {}); }, 5 * 60 * 1000); heartbeatTimer.unref(); }
+function startHealthServer() { if (server) return server; global.START_TIME = new Date().toISOString(); server = app.listen(PORT, () => { console.log(`Health server listening on ${PORT}`); startHeartbeat(); }); return server; }
 module.exports = { app, startHealthServer };

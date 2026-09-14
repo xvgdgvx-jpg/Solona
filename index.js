@@ -83,7 +83,7 @@ const startBot = async () => {
   if (shuttingDown || botStarting || botReady) return;
   botStarting = true;
   try {
-    const polling = bot.start();
+    const polling = bot.start({ drop_pending_updates: true });
     botReady = true;
     retryDelayMs = 5000;
     lastBotError = null;
