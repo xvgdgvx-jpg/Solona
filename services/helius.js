@@ -31,6 +31,7 @@ class HeliusService {
     this.noEventTimer = null;
     this.fallbackTimer = null;
     this.fallbackActive = false;
+    this.reconnectDelayMs = 3000;
     this.noEventWarningShown = false;
     this.lastEventAt = null;
     this.lastError = null;
@@ -91,6 +92,7 @@ class HeliusService {
       console.log('[helius] ✅ WebSocket connected successfully');
       console.log('[helius] ✅ Stream opened');
       this.lastEventAt = Date.now();
+      this.reconnectDelayMs = 3000;
       this.noEventWarningShown = false;
       this.fallbackActive = false;
       this.onState(true);
@@ -112,7 +114,11 @@ class HeliusService {
       const reason = reasonBuffer?.toString() || 'none';
       console.log(`[helius] ⚠️ Stream closed: code=${code}, reason=${reason}`);
       this.ws = null;
-      if (!this.stopped && !this.fallbackActive) this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+      if (!this.stopped && !this.fallbackActive) {
+        const delay = this.reconnectDelayMs;
+        this.reconnectDelayMs = Math.min(120000, Math.round(this.reconnectDelayMs * 1.8));
+        this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      }
     });
   }
 
