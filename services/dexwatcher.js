@@ -11,7 +11,7 @@ class DexWatcher {
     this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, goplus: 0, tracker: 0 };
     this.lastRequestStatus = null;
     this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
-    this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null;
+    this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null; this.openSymbolsCache = [];
   }
   updateSettings(settings) { this.settings = settings; }
   start() {
@@ -85,7 +85,7 @@ class DexWatcher {
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
       const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
       const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
-      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_id || pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, creator: pool.creator || pool.created_by || token.creator || token.created_by || null, dexName: pool.dex_id || pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
@@ -99,10 +99,13 @@ class DexWatcher {
     if (dex.allowedDexes === 'raydium' && String(candidate.dexName).toLowerCase() !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
     const allowedList = ALLOWED_DEXES_BY_MODE[dex.allowedDexes || 'all'] ?? null;
     if (allowedList && !allowedList.includes(String(candidate.dexName).toLowerCase())) return fail('الـ DEX غير مسموح', 'dex');
+    if (this.settings.dex.antiDuplicate !== false) { const existingSymbols = this.openSymbolsCache || []; const candidateSymbol = String(candidate.symbol || '').trim().toUpperCase(); if (candidateSymbol && existingSymbols.includes(candidateSymbol)) return fail(`رمز مكرر (${candidateSymbol})`, 'dex'); }
+    if (this.settings.tracker.enabled && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
     if (this.settings.goplus.enabled) { const result = await this.goplus(candidate.mint); if (result && !this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
     if (this.settings.tracker.enabled) { const result = await this.tracker(candidate.mint); if (result && !this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     this.lastCandidate = candidate; this.passCount += 1; await this.onCandidate(candidate); return true;
   }
+  async checkDeployerReputation(mint, creator) { const apiKey = process.env.SOLANA_TRACKER_API_KEY; const apiUrl = process.env.SOLANA_TRACKER_API_URL; if (!apiKey || !apiUrl || !creator) return { passed: true }; try { const { data } = await axios.get(`${apiUrl.replace(/\/$/, '')}/deployer/${creator}`, { headers: { 'x-api-key': apiKey }, timeout: 6000 }); const tokens = Array.isArray(data?.tokens) ? data.tokens : []; if (tokens.length > 20) return { passed: false, reason: `المنشئ أصدر ${tokens.length} عملة` }; return { passed: true, count: tokens.length }; } catch (_) { return { passed: true }; } }
   async goplus(mint) { return this.request(process.env.GOPLUS_API_URL || `https://api.gopluslabs.io/api/v1/token_security/solana?contract_addresses=${mint}`, { headers: process.env.GOPLUS_API_KEY ? { Authorization: `Bearer ${process.env.GOPLUS_API_KEY}` } : {} }).then((d) => d?.result?.[mint] || null); }
   async tracker(mint) { if (!process.env.SOLANA_TRACKER_API_URL) return null; return this.request(`${process.env.SOLANA_TRACKER_API_URL.replace(/\/$/, '')}/${mint}`, { headers: process.env.SOLANA_TRACKER_API_KEY ? { 'x-api-key': process.env.SOLANA_TRACKER_API_KEY } : {} }); }
   passGoplus(r) { const g = this.settings.goplus; const num = (...keys) => { for (const k of keys) if (r[k] != null) return Number(r[k]); return null; }; const buy = num('buy_tax', 'buy_tax_rate'); const sell = num('sell_tax', 'sell_tax_rate'); if (g.rejectHoneypot && ['1', 1, true, 'true'].includes(r.is_honeypot)) return false; if (buy != null && Number(g.maxBuyTax) >= 0 && buy > Number(g.maxBuyTax)) return false; if (sell != null && Number(g.maxSellTax) >= 0 && sell > Number(g.maxSellTax)) return false; if (g.checkMintAuthority && ['1', 1, true, 'true'].includes(r.mintable)) return false; if (g.checkFreezeAuthority && ['1', 1, true, 'true'].includes(r.freezable)) return false; return true; }
