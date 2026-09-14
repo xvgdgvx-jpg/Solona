@@ -3,6 +3,7 @@ const { getUser, saveUser } = require('./storage');
 const defaults = {
   autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, killSwitch: false,
   paperCapitalSol: 3, paperAvailableSol: 3, paperAllocationPct: 5,
+  paperTakeProfitFirstPct: 50, paperStopLossPct: 10,
   paperEvents: [], paperPnlSol: 0, liveTrading: false, tradeSizeSol: 0.1,
   maxTradesPerDay: 0, tradesToday: 0, tradeDay: new Date().toISOString().slice(0, 10),
   dex: { minAgeSec: 60, maxAgeSec: 86400, minVolumeUsd: 1000, minLiquidityUsd: 5000, minBuys24h: 25, minBuySellRatio: 1, minMarketCapUsd: 10000, maxMarketCapUsd: 0, allowedDexes: 'raydium' },
