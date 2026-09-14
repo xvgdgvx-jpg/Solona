@@ -85,7 +85,7 @@ class DexWatcher {
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
       const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
       const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
-      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_id || pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
