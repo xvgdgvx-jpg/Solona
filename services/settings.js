@@ -3,12 +3,12 @@ const { getUser, saveUser } = require('./storage');
 const defaults = {
   autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, killSwitch: false,
   paperCapitalSol: 3, paperAvailableSol: 3, paperAllocationPct: 5,
-  paperTakeProfitFirstPct: 50, paperStopLossPct: 10,
+  paperTakeProfitFirstPct: 30, paperStopLossPct: 15,
   paperEvents: [], paperPnlSol: 0, liveTrading: false, tradeSizeSol: 0.1,
   maxTradesPerDay: 0, tradesToday: 0, tradeDay: new Date().toISOString().slice(0, 10),
-  dex: { minAgeSec: 60, maxAgeSec: 86400, minVolumeUsd: 1000, minLiquidityUsd: 5000, minBuys24h: 25, minBuySellRatio: 1, minMarketCapUsd: 10000, maxMarketCapUsd: 0, allowedDexes: 'raydium' },
-  goplus: { enabled: true, maxBuyTax: 10, maxSellTax: 10, rejectHoneypot: true, checkMintAuthority: true, checkFreezeAuthority: true },
-  tracker: { enabled: true, maxRiskScore: 5, rejectRugged: true, maxDeveloperHoldingPct: 20, maxSnipersPct: 30, maxInsidersPct: 30, maxBundlersPct: 50, maxTop10Pct: 40, minHolders: 25, maxDeveloperTokens: 0 },
+  dex: { minAgeSec: 60, maxAgeSec: 86400, minVolumeUsd: 1000, minLiquidityUsd: 5000, minBuys24h: 25, minBuySellRatio: 1, minMarketCapUsd: 10000, maxMarketCapUsd: 0, allowedDexes: 'raydium_orca' },
+  goplus: { enabled: false, maxBuyTax: 10, maxSellTax: 10, rejectHoneypot: true, checkMintAuthority: true, checkFreezeAuthority: true },
+  tracker: { enabled: false, maxRiskScore: 3, rejectRugged: true, maxDeveloperHoldingPct: 15, maxSnipersPct: 15, maxInsidersPct: 15, maxBundlersPct: 30, maxTop10Pct: 25, minHolders: 100, maxDeveloperTokens: 0 },
   risk: { stopLossPct: 10, capitalProtection: '50@-10', timedSellMin: 0, emergencyBreaker: true, dailyLossPct: 0 },
   lastMint: null, lastFilterResult: 'لم يبدأ الفحص بعد', rejectStats: {}, checkedCount: 0, lastCheckAt: null,
 };

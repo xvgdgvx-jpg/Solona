@@ -5,8 +5,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 class DexWatcher {
   constructor({ settings, onCandidate, onError, onFilter }) {
     this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
-    this.running = false; this.timer = null; this.watchdog = null; this.lastPollAt = null; this.lastError = null;
-    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.pollInFlight = false; this.lastPollDurationMs = null;
+    this.running = false; this.timer = null; this.watchdog = null; this.statusTimer = setInterval(() => console.log(`[dexwatcher-status] checked=${this.checkedCount} seen=${this.seen.size} polls=${this.pollCount} lastPoll=${this.lastPollAt} dur=${this.lastPollDurationMs}ms err=${this.lastError || 'none'}`), 60000); this.statusTimer.unref(); this.lastPollAt = null; this.lastError = null;
+    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {};
+    this.lastRequestStatus = null;
     this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
     this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null;
   }
@@ -15,19 +16,27 @@ class DexWatcher {
     if (this.running) return true;
     this.running = true; this.poll();
     this.timer = setInterval(() => this.poll(), 5000);
-    this.watchdog = setInterval(() => { if (this.running && (!this.lastPollAt || Date.now() - this.lastPollAt > 20000)) { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 5000); this.poll(); } }, 60000);
+    this.watchdog = setInterval(() => { if (this.running && (!this.lastPollAt || Date.now() - new Date(this.lastPollAt).getTime() > 20000)) { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 5000); this.poll(); } }, 60000);
     return true;
   }
-  stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); this.timer = this.watchdog = null; }
-  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.nextAllowedPollAt = 0; }
-  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, seen: this.seen.size, source: 'DexPaprika' }; }
+  stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); if (this.statusTimer) clearInterval(this.statusTimer); this.timer = this.watchdog = this.statusTimer = null; }
+  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.lastPollStarted = null; this.nextAllowedPollAt = 0; } 
+  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
   async request(url, options = {}) {
-    try { return (await axios.get(url, { timeout: 10000, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options })).data; }
-    catch (error) { this.lastRequestStatus = error.response?.status || null; this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null; }
+    const attempts = Number(options.retries ?? 2); const requestOptions = { timeout: 10000, headers: { 'User-Agent': 'Solana-DexPaprika-Watcher/1.0', 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options }; delete requestOptions.retries;
+    for (let attempt = 0; attempt <= attempts; attempt += 1) {
+      try { this.lastRequestStatus = null; return (await axios.get(url, requestOptions)).data; }
+      catch (error) {
+        const status = error.response?.status; this.lastRequestStatus = status || null;
+        if (status === 429 && attempt < attempts) { await sleep(Math.min(15000, Math.max(1000, (attempt + 1) * 2000))); continue; }
+        this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null;
+      }
+    }
+    return null;
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
-    this.pollInFlight = true; const startedAt = Date.now(); this.lastPollAt = startedAt;
+    this.pollInFlight = true; this.lastPollStarted = Date.now(); const startedAt = this.lastPollStarted; this.lastPollAt = startedAt; this.pollCount = (this.pollCount || 0) + 1; let newCount = 0;
     try {
       const createdAfter = Math.floor(Date.now() / 1000) - 3600;
       const params = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true, created_after: createdAfter };
@@ -40,14 +49,16 @@ class DexWatcher {
       }
       if (!data) { this.nextAllowedPollAt = Date.now() + 60000; return; }
       const pools = Array.isArray(data) ? data : (data?.results || data?.pools || data?.data || []);
+      console.log(`[dexwatcher] poll#${this.pollCount} fetched=${pools.length}`);
       for (const pool of pools) {
         const candidate = this.loadCandidate(pool);
         if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || candidate.volumeUsd <= 0 || this.seen.has(candidate.mint)) continue;
         this.seen.add(candidate.mint);
+        this.checkedCount += 1; this.checked = this.checkedCount; newCount += 1;
         await this.evaluate(candidate);
       }
     } catch (error) { this.lastError = error.message; this.onError(error); }
-    finally { this.lastPollDurationMs = Date.now() - startedAt; this.pollInFlight = false; }
+    finally { this.lastPollDurationMs = Date.now() - startedAt; this.lastPollAt = new Date().toISOString(); console.log(`[dexwatcher] poll#${this.pollCount} done — new=${typeof newCount === 'number' ? newCount : 0} checked=${this.checkedCount} seen=${this.seen.size} duration=${this.lastPollDurationMs}ms`); this.pollInFlight = false; }
   }
   loadCandidate(pool) {
     try {
@@ -60,14 +71,15 @@ class DexWatcher {
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
-    this.checked += 1; const dex = this.settings.dex; const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
+    const dex = this.settings.dex; const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
     const fail = (reason, stage) => { this.onFilter(candidate, reason, stage); return false; };
     if (!candidate.mint || (() => { try { new PublicKey(candidate.mint); return false; } catch (_) { return true; } })()) return fail('عنوان العملة غير صالح', 'dex');
     if (age != null && (age < Number(dex.minAgeSec) || (Number(dex.maxAgeSec) > 0 && age > Number(dex.maxAgeSec)))) return fail('العمر خارج الحدود', 'dex');
     if (candidate.volumeUsd < Number(dex.minVolumeUsd) || candidate.liquidityUsd < Number(dex.minLiquidityUsd)) return fail('الحجم أو السيولة أقل من الحد', 'dex');
     if (candidate.dexBuys < Number(dex.minBuys24h) || candidate.buySellRatio < Number(dex.minBuySellRatio)) return fail('المشتريات أو نسبة الشراء/البيع أقل من الحد', 'dex');
     if (candidate.marketCapUsd < Number(dex.minMarketCapUsd) || (Number(dex.maxMarketCapUsd) > 0 && candidate.marketCapUsd > Number(dex.maxMarketCapUsd))) return fail('القيمة السوقية خارج الحدود', 'dex');
-    if (dex.allowedDexes !== 'all' && dex.allowedDexes === 'raydium' && String(candidate.dexName).toLowerCase() !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
+    if (dex.allowedDexes === 'raydium' && String(candidate.dexName).toLowerCase() !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
+    if (dex.allowedDexes === 'raydium_orca' && !['raydium', 'orca'].includes(String(candidate.dexName).toLowerCase())) return fail('الـ DEX غير مسموح', 'dex');
     if (this.settings.goplus.enabled) { const result = await this.goplus(candidate.mint); if (result && !this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
     if (this.settings.tracker.enabled) { const result = await this.tracker(candidate.mint); if (result && !this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     this.lastCandidate = candidate; await this.onCandidate(candidate); return true;
