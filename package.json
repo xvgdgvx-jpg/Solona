@@ -1,5 +1,5 @@
 {
-  "name": "solana-meme-sniper-bot",
+  "name": "solana-dex-trading-bot",
   "version": "1.0.0",
   "private": true,
   "description": "Guarded Solana meme coin Telegram trading bot with Jupiter execution.",

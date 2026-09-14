@@ -39,7 +39,6 @@ const jupiterUrl = configuredJupiterUrl.includes('quote-api.jup.ag') ? 'https://
 const rpcUrl = process.env.HELIUS_RPC_URL
   || process.env.SOLANA_RPC_URL
   || 'https://api.mainnet-beta.solana.com';
-if (!rpcUrl) throw new Error('Missing RPC URL: يجب توفير HELIUS_RPC_URL');
 
 module.exports = {
   token: process.env.TELEGRAM_BOT_TOKEN,
@@ -52,8 +51,5 @@ module.exports = {
   jupiterUrl,
   port: Number(process.env.PORT || 3000),
   keepAliveUrl: process.env.KEEPALIVE_URL || `http://127.0.0.1:${process.env.PORT || 3000}/health`,
-  heliusApiKey: process.env.HELIUS_API_KEY || '',
-  heliusRpcUrl: process.env.HELIUS_RPC_URL || '',
-  heliusWsUrl: process.env.HELIUS_WS_URL || '',
   priorityFeeMaxLamports: Number(process.env.PRIORITY_FEE_MAX_LAMPORTS || 500000)
 };

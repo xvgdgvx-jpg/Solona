@@ -56,7 +56,7 @@ function releaseLock() {
   lockOwned = false;
 }
 
-if (!acquireLock()) process.exit(1);
+if (!acquireLock()) process.kill(process.pid, 'SIGTERM');
 process.once('exit', releaseLock);
 
 let botStarting = false;
@@ -130,4 +130,4 @@ const shutdown = async (signal, exitCode = 0) => {
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 process.on('unhandledRejection', (reason) => { console.error(`Unhandled promise rejection: ${reason?.stack || reason}`); });
-process.on('uncaughtException', (error) => { console.error(`Uncaught exception: ${error.stack || error.message}`); shutdown('UNCAUGHT_EXCEPTION', 1); });
+process.on('uncaughtException', (error) => { console.error(`Uncaught exception: ${error.stack || error.message}`); });
