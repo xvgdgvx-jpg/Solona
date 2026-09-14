@@ -1,6 +1,6 @@
 # Solana DEX Trading Bot
 
-بوت تيليجرام لمراقبة أزواج Solana عبر DexScreener كل خمس ثوانٍ، ثم تطبيق فحوص اختيارية عبر GoPlus وSolana Tracker قبل التداول التجريبي عبر Jupiter.
+بوت تيليجرام لمراقبة أزواج Solana عبر DexPaprika كل خمس ثوانٍ، ثم تطبيق فحوص اختيارية عبر GoPlus وSolana Tracker قبل التداول التجريبي عبر Jupiter.
 
 ## التشغيل
 

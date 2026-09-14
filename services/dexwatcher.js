@@ -7,54 +7,43 @@ class DexWatcher {
     this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
     this.running = false; this.timer = null; this.watchdog = null; this.lastPollAt = null; this.lastError = null;
     this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.pollInFlight = false; this.lastPollDurationMs = null;
-    this.discoveryUrl = process.env.DEX_DISCOVERY_URL || 'https://api.dexscreener.com/token-profiles/latest/v1';
-    this.discoveryFallbackUrl = process.env.DEX_DISCOVERY_FALLBACK_URL || 'https://api.dexscreener.com/token-boosts/latest/v1';
+    this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
     this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0;
   }
   updateSettings(settings) { this.settings = settings; }
   start() {
     if (this.running) return true;
     this.running = true; this.poll();
-    this.timer = setInterval(() => this.poll(), Number(process.env.DEX_POLL_INTERVAL_MS || 15000));
-    this.watchdog = setInterval(() => { if (this.running && (!this.lastPollAt || Date.now() - this.lastPollAt > 45000)) { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), Number(process.env.DEX_POLL_INTERVAL_MS || 15000)); this.poll(); } }, 60000);
+    this.timer = setInterval(() => this.poll(), 5000);
+    this.watchdog = setInterval(() => { if (this.running && (!this.lastPollAt || Date.now() - this.lastPollAt > 20000)) { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 5000); this.poll(); } }, 60000);
     return true;
   }
   stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); this.timer = this.watchdog = null; }
   reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.nextAllowedPollAt = 0; }
-  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, seen: this.seen.size, source: 'DexScreener' }; }
+  status() { return { running: this.running, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastError: this.lastError, lastCandidate: this.lastCandidate, checked: this.checked, seen: this.seen.size, source: 'DexPaprika' }; }
   async request(url, options = {}) {
-    const attempts = Number(options.retries ?? 2); const requestOptions = { timeout: 10000, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options }; delete requestOptions.retries;
-    for (let attempt = 0; attempt <= attempts; attempt += 1) {
-      try { return (await axios.get(url, requestOptions)).data; } catch (error) {
-        const status = error.response?.status;
-        if (status === 429 && attempt < attempts) { const retryAfter = Number(error.response.headers?.['retry-after'] || 0); await sleep(Math.min(30000, Math.max(1500, retryAfter * 1000 || (attempt + 1) * 3000))); continue; }
-        this.lastError = status === 429 ? 'DexScreener حدّ الطلبات (429)' : error.message;
-        if (status !== 429 || Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(new Error(this.lastError)); }
-        return null;
-      }
-    }
-    return null;
+    try { return (await axios.get(url, { timeout: 10000, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options })).data; }
+    catch (error) { this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null; }
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
     this.pollInFlight = true; const startedAt = Date.now(); this.lastPollAt = startedAt;
     try {
-      let data = await this.request(this.discoveryUrl);
-      if (!data && this.discoveryFallbackUrl) data = await this.request(this.discoveryFallbackUrl);
-      const profiles = Array.isArray(data) ? data : (data?.profiles || data?.data || []);
-      const candidates = profiles.filter((x) => String(x.chainId).toLowerCase() === 'solana' && x.tokenAddress).slice(0, 50);
-      for (const profile of candidates) { const mint = profile.tokenAddress; if (this.seen.has(mint)) continue; const candidate = await this.loadCandidate(mint, profile); if (!candidate) continue; this.seen.add(mint); await this.evaluate(candidate); }
-      if (!data) this.nextAllowedPollAt = Date.now() + 60000;
+      const data = await this.request(this.discoveryUrl, { params: { order_by: 'volume_usd_24h', sort: 'desc', limit: 50 } });
+      if (!data) { this.nextAllowedPollAt = Date.now() + 60000; return; }
+      const pools = Array.isArray(data) ? data : (data?.results || data?.pools || data?.data || []);
+      for (const pool of pools) { const candidate = this.loadCandidate(pool); if (!candidate || this.seen.has(candidate.mint)) continue; this.seen.add(candidate.mint); await this.evaluate(candidate); }
     } catch (error) { this.lastError = error.message; this.onError(error); }
     finally { this.lastPollDurationMs = Date.now() - startedAt; this.pollInFlight = false; }
   }
-  async loadCandidate(mint, profile) {
+  loadCandidate(pool) {
     try {
-      const data = await this.request(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { retries: 1 });
-      const pairs = (data?.pairs || []).filter((p) => String(p.chainId).toLowerCase() === 'solana'); const pair = pairs.sort((a, b) => Number(b.volume?.h24 || 0) - Number(a.volume?.h24 || 0))[0]; if (!pair) return null;
-      const createdAt = Number(pair.pairCreatedAt || 0);
-      return { mint, name: pair.baseToken?.name || profile.description || '', symbol: pair.baseToken?.symbol || 'N/A', decimals: 6, createdAt: createdAt ? createdAt / 1000 : null, marketCapUsd: Number(pair.marketCap || pair.fdv || 0) || null, liquidityUsd: Number(pair.liquidity?.usd || 0) || null, volumeUsd: Number(pair.volume?.h24 || 0) || 0, dexBuys: Number(pair.txns?.h24?.buys || 0), dexSells: Number(pair.txns?.h24?.sells || 0), buySellRatio: Number(pair.txns?.h24?.buys || 0) / Math.max(1, Number(pair.txns?.h24?.sells || 0)), mintAuthority: null, freezeAuthority: null, dexScreenerPair: pair.pairAddress, dexScreenerDex: pair.dexId, marketDataSource: 'dexscreener', source: 'dexscreener' };
-    } catch (error) { this.onError(error); return null; }
+      const token = Array.isArray(pool.tokens) ? pool.tokens[0] : null; const mint = token?.id;
+      if (!mint) return null;
+      const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
+      const created = pool.created_at ? Date.parse(pool.created_at) / 1000 : null;
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, dexName: pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+    } catch (_) { return null; }
   }
   async evaluate(candidate) {
     this.checked += 1; const dex = this.settings.dex; const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
@@ -64,7 +53,7 @@ class DexWatcher {
     if (candidate.volumeUsd < Number(dex.minVolumeUsd) || candidate.liquidityUsd < Number(dex.minLiquidityUsd)) return fail('الحجم أو السيولة أقل من الحد', 'dex');
     if (candidate.dexBuys < Number(dex.minBuys24h) || candidate.buySellRatio < Number(dex.minBuySellRatio)) return fail('المشتريات أو نسبة الشراء/البيع أقل من الحد', 'dex');
     if (candidate.marketCapUsd < Number(dex.minMarketCapUsd) || (Number(dex.maxMarketCapUsd) > 0 && candidate.marketCapUsd > Number(dex.maxMarketCapUsd))) return fail('القيمة السوقية خارج الحدود', 'dex');
-    if (dex.allowedDexes !== 'all' && dex.allowedDexes === 'raydium' && candidate.dexScreenerDex !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
+    if (dex.allowedDexes !== 'all' && dex.allowedDexes === 'raydium' && String(candidate.dexName).toLowerCase() !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
     if (this.settings.goplus.enabled) { const result = await this.goplus(candidate.mint); if (result && !this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
     if (this.settings.tracker.enabled) { const result = await this.tracker(candidate.mint); if (result && !this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     this.lastCandidate = candidate; await this.onCandidate(candidate); return true;
