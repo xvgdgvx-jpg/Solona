@@ -1,6 +1,8 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const SOL_MINT_ADDR = 'So11111111111111111111111111111111111111112';
+const ALLOWED_DEXES = new Set(['raydium', 'orca', 'meteora_daam_v2', 'meteora_dbc']);
 
 class DexWatcher {
   constructor({ settings, onCandidate, onError, onFilter }) {
@@ -39,7 +41,7 @@ class DexWatcher {
     this.pollInFlight = true; this.lastPollStarted = Date.now(); const startedAt = this.lastPollStarted; this.lastPollAt = startedAt; this.pollCount = (this.pollCount || 0) + 1; let newCount = 0;
     try {
       const createdAfter = Math.floor(Date.now() / 1000) - 3600;
-      const params = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true, created_after: createdAfter };
+      const params = { order_by: 'created_at', sort: 'desc', limit: 50, detailed: true, created_after: createdAfter };
       this.lastRequestStatus = null;
       let data = await this.request(this.discoveryUrl, { params });
       if (!data && this.lastRequestStatus === 400) {
@@ -50,20 +52,30 @@ class DexWatcher {
       if (!data) { this.nextAllowedPollAt = Date.now() + 60000; return; }
       const pools = Array.isArray(data) ? data : (data?.results || data?.pools || data?.data || []);
       console.log(`[dexwatcher] poll#${this.pollCount} fetched=${pools.length}`);
-      for (const pool of pools) {
-        const candidate = this.loadCandidate(pool);
-        if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || candidate.volumeUsd <= 0 || this.seen.has(candidate.mint)) continue;
-        this.seen.add(candidate.mint);
-        this.checkedCount += 1; this.checked = this.checkedCount; newCount += 1;
-        await this.evaluate(candidate);
+      const batches = [];
+      for (let i = 0; i < pools.length; i += 10) batches.push(pools.slice(i, i + 10));
+      for (const batch of batches) {
+        const results = await Promise.all(batch.map(async (pool) => {
+          const dexId = String(pool?.dex_id || '').toLowerCase();
+          if (!ALLOWED_DEXES.has(dexId)) return false;
+          const candidate = this.loadCandidate(pool);
+          if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || this.seen.has(candidate.mint)) return false;
+          this.seen.add(candidate.mint);
+          this.checkedCount += 1; this.checked = this.checkedCount;
+          await this.evaluate(candidate);
+          return true;
+        }));
+        newCount += results.filter(Boolean).length;
       }
     } catch (error) { this.lastError = error.message; this.onError(error); }
     finally { this.lastPollDurationMs = Date.now() - startedAt; this.lastPollAt = new Date().toISOString(); console.log(`[dexwatcher] poll#${this.pollCount} done — new=${typeof newCount === 'number' ? newCount : 0} checked=${this.checkedCount} seen=${this.seen.size} duration=${this.lastPollDurationMs}ms`); this.pollInFlight = false; }
   }
   loadCandidate(pool) {
     try {
-      const token = Array.isArray(pool.tokens) ? pool.tokens[0] : null; const mint = token?.id;
-      if (!mint) return null;
+      const tokens = Array.isArray(pool.tokens) ? pool.tokens : [];
+      const token = tokens.find((t) => t?.id && t.id !== SOL_MINT_ADDR) || tokens[0];
+      const mint = token?.id;
+      if (!mint || mint === SOL_MINT_ADDR) return null;
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
       const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
       const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
@@ -72,7 +84,7 @@ class DexWatcher {
   }
   async evaluate(candidate) {
     const dex = this.settings.dex; const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
-    const fail = (reason, stage) => { this.onFilter(candidate, reason, stage); return false; };
+    const fail = (reason, stage) => { const key = `${stage}: ${reason}`; this.rejectStats[key] = (this.rejectStats[key] || 0) + 1; this.onFilter(candidate, reason, stage); return false; };
     if (!candidate.mint || (() => { try { new PublicKey(candidate.mint); return false; } catch (_) { return true; } })()) return fail('عنوان العملة غير صالح', 'dex');
     if (age != null && (age < Number(dex.minAgeSec) || (Number(dex.maxAgeSec) > 0 && age > Number(dex.maxAgeSec)))) return fail('العمر خارج الحدود', 'dex');
     if (candidate.volumeUsd < Number(dex.minVolumeUsd) || candidate.liquidityUsd < Number(dex.minLiquidityUsd)) return fail('الحجم أو السيولة أقل من الحد', 'dex');
