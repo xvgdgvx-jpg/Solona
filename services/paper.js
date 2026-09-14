@@ -178,6 +178,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
       currentPosition.sellSignatures = [...(currentPosition.sellSignatures || []), swapResult.signature];
       currentPosition.lastPricingAt = Date.now();
       currentPosition.consecutivePricingErrors = 0;
+      currentPosition.realizedPnlSol = Number(currentPosition.realizedPnlSol || 0) + pnlSol;
       if (fraction >= 1) currentPosition.status = 'closed';
       else {
         currentPosition.tokenAmountRaw -= amountToSell;
@@ -196,6 +197,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
     const currentPositions = getPositions(adminId, key);
     const currentPosition = currentPositions.find((p) => p.id === positionId && p.status === 'closing');
     if (!currentPosition) throw new Error('تعذر العثور على المركز المحدّث بعد تسعير البيع.');
+    currentPosition.realizedPnlSol = Number(currentPosition.realizedPnlSol || 0) + Number(value.pnlSol || 0);
     if (fraction >= 1) currentPosition.status = 'closed';
     else {
       const soldRaw = Math.floor(currentPosition.tokenAmountRaw * fraction);
