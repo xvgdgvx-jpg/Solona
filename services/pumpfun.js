@@ -48,6 +48,8 @@ class PumpFunWatcher {
       this.watchlist.clear();
       this.watchlistBusy = false;
       this.seen.clear();
+      if (settings.strategyMode === 'growing') this.helius.stop();
+      else if (this.running) this.streamMode = this.helius.start();
       console.log(`[cycle] strategy changed ${previousMode} -> ${settings.strategyMode}; stale watchlist cleared`);
     }
   }
@@ -73,12 +75,15 @@ class PumpFunWatcher {
     if (this.running) return;
     this.running = true;
     const generation = ++this.loopGeneration;
-    this.streamMode = this.helius.start();
+    // Growing listings come from DexScreener; Pump.fun/Helius adds latency
+    // and rate-limit noise without contributing data in this mode.
+    this.streamMode = this.settings.strategyMode === 'growing' ? false : this.helius.start();
     const interval = Math.max(3000, Number(process.env.WATCHLIST_POLL_MS || 5000));
     this.watchTimer = setInterval(() => this.recheckWatchlist(), interval);
     console.log(`Pump.fun watchlist polling every ${interval}ms`);
     this.loop(generation);
     if (this.streamMode) console.log('Helius Pump.fun WebSocket stream started; REST fallback also active');
+    else if (this.settings.strategyMode === 'growing') console.log('Growing strategy: Helius Pump.fun stream disabled; DexScreener discovery only');
   }
 
   stop() {
