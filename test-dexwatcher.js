@@ -8,7 +8,8 @@ async function run() {
   watcher.settings.dex.minVolumeUsd = 5000; assert.equal(await watcher.evaluate({ ...candidate }), false); assert.match(results.at(-1), /^dex:/);
   watcher.settings.dex.minVolumeUsd = 100; const mature = { ...candidate, createdAt: Date.now() / 1000 - 700 }; watcher.goplus = async () => ({ is_honeypot: 1 }); assert.equal(await watcher.evaluate(mature), false); assert.match(results.at(-1), /^goplus:/);
   watcher.goplus = async () => ({ is_honeypot: 0 }); watcher.tracker = async () => ({ riskScore: 9 }); assert.equal(await watcher.evaluate(mature), false); assert.match(results.at(-1), /^tracker:/);
-  watcher.settings.onchain.enabled = false; assert.equal(await watcher.evaluate({ ...candidate }), false); assert.match(results.at(-1), /^onchain:/);
-  console.log('dexwatcher scenarios: 5 passed');
+  watcher.settings.onchain.enabled = false; watcher.settings.goplus.enabled = false; watcher.settings.tracker.enabled = false; watcher.checkOnChain = async () => { throw new Error('disabled On-Chain must be skipped'); }; watcher.goplus = async () => { throw new Error('disabled GoPlus must be skipped'); }; watcher.tracker = async () => { throw new Error('disabled Tracker must be skipped'); }; assert.equal(await watcher.evaluate({ ...mature }), true); assert.equal(results.at(-1), 'pass');
+  watcher.settings.onchain.enabled = true; watcher.checkOnChain = async () => ({ passed: true, data: { rpcError: 'RPC down' } }); assert.equal(await watcher.evaluate({ ...candidate }), false); assert.match(results.at(-1), /^onchain:/);
+  console.log('dexwatcher scenarios: 6 passed');
 }
 run().catch((error) => { console.error(error); process.exitCode = 1; });
