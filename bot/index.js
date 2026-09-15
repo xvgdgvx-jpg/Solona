@@ -3,7 +3,7 @@ const config = require('../config');
 const { getQuote, SOL_MINT, keypairFromSecret, getSolBalance, executeSwap } = require('../services/solana');
 const { getSettings, saveSettings } = require('../services/settings');
 const { DexWatcher } = require('../services/dexwatcher');
-const { openPosition, getPositions, savePositions, replacePositions, closePosition, refreshPositionsCached, refreshPositions } = require('../services/paper');
+const { openPosition, getPositions, savePositions, replacePositions, closePosition, refreshPositionsCached, refreshPositions, mergeDuplicateOpenPositions } = require('../services/paper');
 const { startHealthServer } = require('../health-server');
 startHealthServer();
 const bot = new Bot(config.token);
@@ -97,6 +97,7 @@ bot.catch(async (e) => { console.error(`[telegram] ${e.message || e}`); try { aw
 
 let monitorTimer = null;
 let monitorBusy = false;
+const autoSellMints = new Set();
 async function monitorPositions() {
   if (monitorBusy) return;
   monitorBusy = true;
@@ -104,6 +105,7 @@ async function monitorPositions() {
   try {
     const s = settings();
     if (!s.autoSellEnabled || s.killSwitch) return;
+    await mergeDuplicateOpenPositions(config.adminId, config.encryptionKey);
     const positions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open');
     const risk = s.risk || {};
     const today = new Date().toISOString().slice(0, 10);
@@ -131,7 +133,8 @@ async function monitorPositions() {
         else if (pnlPct >= takeProfitPct) action = { type: 'TP', reason: 'جني أرباح كامل +' + takeProfitPct + '%', fraction: 1 };
         else if (protection && !pos.capitalProtectionTriggered && pnlPct <= Number(protection[2])) action = { type: 'CP', reason: 'حماية رأس المال عند ' + protection[2] + '%', fraction: Number(protection[1]) / 100 };
         else if (Number(s.risk?.timedSellMin || 0) > 0 && ageMinutes >= Number(s.risk.timedSellMin) && pnlPct < 0) action = { type: 'TIMED', reason: 'بيع زمني بعد ' + s.risk.timedSellMin + ' دقيقة', fraction: 1 };
-        if (!action) return;
+        if (!action || autoSellMints.has(pos.mint)) return;
+        autoSellMints.add(pos.mint);
         const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: pos.id, fraction: action.fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: config.masterPrivateKey });
         if (!result) return;
         const latest = settings();
@@ -144,7 +147,7 @@ async function monitorPositions() {
         latest.paperEvents = [...(latest.paperEvents || []), { type: 'بيع', name: pos.name, symbol: pos.symbol, mint: pos.mint, reason: action.reason, triggerType: action.type, investedSol: Number(pos.investedSol || 0) * soldFraction, receivedSol: Number(result.currentSol || 0), pnlSol: safePnlSol, pnlPct: safePnlPct, fraction: Number(action.fraction || 1), entryPriceSol: Number(pos.entryPriceSol || 0), sellPriceSol: Number(result.currentSol || 0) / Math.max(1e-18, (Number(pos.tokenAmount || 0) * Number(action.fraction || 1))), ageMinutes: (Date.now() - Number(pos.openedAt || Date.now())) / 60000, timestamp: Date.now() }].slice(-100);
         await save(latest);
         try { await bot.api.sendMessage(config.adminId, '✅ بيع تلقائي\n' + (pos.symbol || pos.mint) + ' — ' + action.reason + '\n' + saleDetails(pos, result, action.fraction) + '\n📈 PnL: ' + safePnlPct.toFixed(2) + '%'); } catch (_) {}
-      } catch (e) { console.error('[monitor] ' + (pos.symbol || pos.mint) + ': ' + e.message); }
+      } catch (e) { console.error('[monitor] ' + (pos.symbol || pos.mint) + ': ' + e.message); } finally { autoSellMints.delete(pos.mint); }
     }));
   } finally { monitorBusy = false; }
 }

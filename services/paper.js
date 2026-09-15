@@ -233,6 +233,40 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
   });
 }
 
+async function mergeDuplicateOpenPositions(adminId, key) {
+  return withPositionsLock(() => {
+    const positions = getPositions(adminId, key);
+    const merged = [];
+    const byKey = new Map();
+    let changed = false;
+    for (const position of positions) {
+      if (position.status !== 'open') { merged.push(position); continue; }
+      const groupKey = `${position.mode || 'paper'}:${position.mint}`;
+      const existing = byKey.get(groupKey);
+      if (!existing) { byKey.set(groupKey, position); merged.push(position); continue; }
+      const decimals = Number(existing.decimals ?? position.decimals ?? 6);
+      const existingRaw = Number(existing.tokenAmountRaw || 0);
+      const incomingRaw = Number(position.tokenAmountRaw || 0);
+      existing.investedSol = Number(existing.investedSol || 0) + Number(position.investedSol || 0);
+      existing.tokenAmountRaw = existingRaw + incomingRaw;
+      existing.tokenAmount = existing.tokenAmountRaw / (10 ** decimals);
+      existing.decimals = decimals;
+      existing.entryPriceSol = existing.tokenAmount > 0 ? existing.investedSol / existing.tokenAmount : 0;
+      existing.updatedAt = Date.now();
+      existing.buySignatures = [...(existing.buySignatures || []), ...(position.buySignature ? [position.buySignature] : []), ...(position.buySignatures || [])];
+      existing.entryMetadata = { ...(existing.entryMetadata || {}), ...(position.entryMetadata || {}) };
+      changed = true;
+    }
+    if (changed) saveUserForPositions(adminId, merged, key);
+    return { positions: merged, changed };
+  });
+}
+
+function saveUserForPositions(adminId, positions, key) {
+  const user = getUser(adminId, key);
+  saveUser(adminId, { ...user, paperPositions: positions }, key);
+}
+
 function cleanupStaleClosing(adminId, key) {
   return withPositionsLock(() => {
     const positions = getPositions(adminId, key);
@@ -250,4 +284,4 @@ function cleanupStaleClosing(adminId, key) {
   });
 }
 
-module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, savePositions, replacePositions, cleanupStaleClosing };
+module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, savePositions, replacePositions, mergeDuplicateOpenPositions, cleanupStaleClosing };

@@ -24,6 +24,8 @@ assert.match(source, /if \(wasRunning\) watcher\.start\(\)/);
 assert.match(source, /if \(wasRunning && s\.autoSellEnabled\) startMonitor\(\)/);
 assert.match(source, /catch \(error\).*فشلت إعادة الضبط/s);
 assert.match(source, /takeProfitPct/);
+assert.match(source, /mergeDuplicateOpenPositions/);
+assert.match(source, /autoSellMints/);
 assert.match(source, /جني أرباح كامل \+.*fraction: 1/);
 assert.doesNotMatch(source, /fraction: 0\.5/);
 assert.doesNotMatch(source, /paperTakeProfitFinalPct/);
