@@ -103,7 +103,7 @@ async function monitorPositions() {
     const positions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open');
     if (!positions.length) return;
     console.log('[monitor] Checking ' + positions.length + ' positions');
-    for (const pos of positions) {
+    await Promise.all(positions.map(async (pos) => {
       try {
         const quote = await getQuote({ jupiterUrl: config.jupiterUrl, inputMint: pos.mint, outputMint: SOL_MINT, amountLamports: pos.tokenAmountRaw, slippageBps: 100 });
         const currentSol = Number(quote.outAmount) / 1e9;
@@ -116,9 +116,9 @@ async function monitorPositions() {
         if (pnlPct <= -sl && pnlPct < 0) action = { type: 'SL', reason: 'وقف خسارة -' + sl + '%', fraction: 1 };
         else if (pnlPct >= tp2) action = { type: 'TP2', reason: 'هدف نهائي +' + tp2 + '%', fraction: 1 };
         else if (pnlPct >= tp1 && !pos.tp1Sold) action = { type: 'TP1', reason: 'هدف أول +' + tp1 + '%', fraction: 0.5 };
-        if (!action) continue;
+        if (!action) return;
         const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: pos.id, fraction: action.fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: config.masterPrivateKey });
-        if (!result) continue;
+        if (!result) return;
         const latest = settings();
         latest.paperAvailableSol = Number(latest.paperAvailableSol || 0) + Number(result.currentSol || 0);
         const safePnlSol = Math.max(-Number(pos.investedSol || 0), Number(result.pnlSol || 0));
@@ -128,10 +128,10 @@ async function monitorPositions() {
         await save(latest);
         try { await bot.api.sendMessage(config.adminId, '✅ بيع تلقائي\n' + (pos.symbol || pos.mint) + ' — ' + action.reason + '\n' + saleDetails(pos, result, action.fraction) + '\n📈 PnL: ' + safePnlPct.toFixed(2) + '%'); } catch (_) {}
       } catch (e) { console.error('[monitor] ' + (pos.symbol || pos.mint) + ': ' + e.message); }
-    }
+    }));
   } finally { monitorBusy = false; }
 }
-const MONITOR_INTERVAL_MS = Math.max(2000, Number(process.env.AUTO_SELL_INTERVAL_MS || 2000));
+const MONITOR_INTERVAL_MS = Math.max(500, Number(process.env.AUTO_SELL_INTERVAL_MS || 500));
 function startMonitor() { if (monitorTimer) return; console.log(`[monitor] Starting (${MONITOR_INTERVAL_MS}ms interval)`); monitorTimer = setInterval(() => monitorPositions().catch((error) => console.error(`[monitor] cycle failed: ${error.message}`)), MONITOR_INTERVAL_MS); monitorTimer.unref(); monitorPositions().catch((error) => console.error(`[monitor] initial cycle failed: ${error.message}`)); }
 function stopMonitor() { if (monitorTimer) clearInterval(monitorTimer); monitorTimer = null; console.log('[monitor] Stopped'); }
 
