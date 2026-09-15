@@ -1,6 +1,6 @@
 const express = require('express');
-const http = require('http');
 const app = express();
+let botStarted = false;
 const PORT = Number(process.env.PORT || 3000);
 let server = null;
 global.START_TIME = global.START_TIME || null;
@@ -9,7 +9,7 @@ app.use(express.json());
 app.use((req, _res, next) => { global.LAST_ACTIVITY = new Date().toISOString(); next(); });
 app.get('/health', (_req, res) => res.status(200).json({ status: 'alive', ts: Date.now(), uptime: process.uptime(), pid: process.pid, lastActivity: global.LAST_ACTIVITY }));
 app.get('/', (_req, res) => res.status(200).send('Bot is Active'));
-app.get('/whoami', (_req, res) => { let started = false; try { started = Boolean(require('./bot').botStarted); } catch (_) {} res.json({ pid: process.pid, startTime: global.START_TIME, botStarted: started }); });
+app.get('/whoami', (_req, res) => res.json({ pid: process.pid, startTime: global.START_TIME, botStarted }));
 app.get('/watcher-status', (_req, res) => {
   try {
     const bot = require('./bot'); const w = bot.watcher;
@@ -30,5 +30,5 @@ app.get('/ping', (_req, res) => res.status(200).send('pong'));
 app.get('/cron-ping', (_req, res) => res.status(200).json({ status: 'awake', ts: Date.now(), uptime: process.uptime() }));
 let heartbeatTimer = null;
 function startHeartbeat() { if (heartbeatTimer) return; const base = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || ''; if (!base) return; heartbeatTimer = setInterval(() => { fetch(`${base.replace(/\/$/, '')}/cron-ping`).catch(() => {}); }, 5 * 60 * 1000); heartbeatTimer.unref(); }
-function startHealthServer() { if (server) return server; global.START_TIME = new Date().toISOString(); server = app.listen(PORT, () => { console.log(`Health server listening on ${PORT}`); startHeartbeat(); }); return server; }
+function startHealthServer() { if (server) return server; botStarted = true; global.START_TIME = new Date().toISOString(); server = app.listen(PORT, () => { console.log(`Health server listening on ${PORT}`); startHeartbeat(); }); return server; }
 module.exports = { app, startHealthServer };
