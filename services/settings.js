@@ -7,6 +7,7 @@ const defaults = {
   paperEvents: [], paperPnlSol: 0, liveTrading: false, tradeSizeSol: 0.1,
   maxTradesPerDay: 0, tradesToday: 0, tradeDay: new Date().toISOString().slice(0, 10),
   dex: { minAgeSec: 30, maxAgeSec: 0, minVolumeUsd: 0, minLiquidityUsd: 500, minBuys24h: 0, minBuySellRatio: 0, minMarketCapUsd: 0, maxMarketCapUsd: 0, allowedDexes: 'raydium_orca_meteora', antiDuplicate: true },
+  onchain: { enabled: true, checkAuthorities: true, checkTop10: true, checkSupply: false, checkDecimals: false, checkUpdateAuthority: false, maxTop10Pct: 50, maxSupply: 0, maxDecimals: 9 },
   goplus: { enabled: false, maxBuyTax: 10, maxSellTax: 10, rejectHoneypot: true, checkMintAuthority: true, checkFreezeAuthority: true },
   tracker: { enabled: false, maxRiskScore: 3, rejectRugged: true, maxDeveloperHoldingPct: 15, maxSnipersPct: 15, maxInsidersPct: 15, maxBundlersPct: 30, maxTop10Pct: 25, minHolders: 100, maxDeveloperTokens: 0 },
   risk: { stopLossPct: 10, capitalProtection: '50@-10', timedSellMin: 0, emergencyBreaker: true, dailyLossPct: 0 },
@@ -15,7 +16,7 @@ const defaults = {
 
 function merge(base, value) {
   const result = { ...base, ...(value || {}) };
-  for (const section of ['dex', 'goplus', 'tracker', 'risk']) result[section] = { ...base[section], ...(value?.[section] || {}) };
+  for (const section of ['dex', 'onchain', 'goplus', 'tracker', 'risk']) result[section] = { ...base[section], ...(value?.[section] || {}) };
   return result;
 }
 function getSettings(adminId, key) {

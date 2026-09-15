@@ -14,7 +14,16 @@ app.get('/watcher-status', (_req, res) => {
   try {
     const bot = require('./bot'); const w = bot.watcher;
     if (!w) return res.status(200).json({ running: false, error: 'no-watcher-instance', uptime: process.uptime() });
-    res.status(200).json({ running: Boolean(w.running), source: w.source || 'DexPaprika', checked: Number(w.checkedCount || 0), seen: Number(w.seen?.size || 0), lastPollAt: w.lastPollAt || null, lastPollDurationMs: w.lastPollDurationMs || null, lastRequestDurationMs: w.lastRequestDurationMs || null, lastError: w.lastError || null, passCount: Number(w.passCount || 0), rejectCount: Number(w.rejectCount || 0), rejectByStage: w.rejectByStage || {}, lastMint: w.lastCandidate?.mint || null, lastSymbol: w.lastCandidate?.symbol || null, rejectStats: w.rejectStats || {}, pollCount: Number(w.pollCount || 0), startedAt: w.startedAt || null, uptime: process.uptime(), env: { hasDexPaprika: true, hasGoPlus: Boolean(process.env.GOPLUS_API_KEY), hasSolanaTracker: Boolean(process.env.SOLANA_TRACKER_API_KEY) } });
+    res.status(200).json({ running: Boolean(w.running), source: w.source || 'DexPaprika', checked: Number(w.checkedCount || 0), seen: Number(w.seen?.size || 0), lastPollAt: w.lastPollAt || null, lastPollDurationMs: w.lastPollDurationMs || null, lastRequestDurationMs: w.lastRequestDurationMs || null, lastError: w.lastError || null, passCount: Number(w.passCount || 0), rejectCount: Number(w.rejectCount || 0), rejectByStage: w.rejectByStage || {}, lastRpcError: w.lastRpcError || null, onChainCacheSize: Number(w.onChainCache?.size || 0), lastMint: w.lastCandidate?.mint || null, lastSymbol: w.lastCandidate?.symbol || null, rejectStats: w.rejectStats || {}, pollCount: Number(w.pollCount || 0), startedAt: w.startedAt || null, uptime: process.uptime(), env: { hasDexPaprika: true, hasGoPlus: Boolean(process.env.GOPLUS_API_KEY), hasSolanaTracker: Boolean(process.env.SOLANA_TRACKER_API_KEY) } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/monitor-status', (_req, res) => {
+  try {
+    const bot = require('./bot');
+    const config = require('./config');
+    const { getPositions } = require('./services/paper');
+    const positions = getPositions(config.adminId, config.encryptionKey).filter((p) => p.status === 'open');
+    res.json({ monitorRunning: Boolean(bot.getMonitorTimer?.()), busy: Boolean(bot.getMonitorBusy?.()), positionsCount: positions.length, lastCheck: global.LAST_MONITOR_CHECK || null, positions: positions.map((p) => ({ symbol: p.symbol, mint: p.mint, investedSol: p.investedSol, ageMinutes: Math.floor((Date.now() - p.openedAt) / 60000) })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/ping', (_req, res) => res.status(200).send('pong'));

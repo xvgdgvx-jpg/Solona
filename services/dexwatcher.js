@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { PublicKey } = require('@solana/web3.js');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SOL_MINT_ADDR = 'So11111111111111111111111111111111111111112';
 const ALLOWED_DEXES_BY_MODE = { raydium: ['raydium'], raydium_orca: ['raydium', 'orca'], raydium_orca_meteora: ['raydium', 'orca', 'meteora_daam_v2', 'meteora_dbc'], all: null };
@@ -8,7 +8,7 @@ class DexWatcher {
   constructor({ settings, onCandidate, onError, onFilter }) {
     this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
     this.running = false; this.timer = null; this.watchdog = null; this.statusTimer = setInterval(() => console.log(`[dexwatcher-status] checked=${this.checkedCount} seen=${this.seen.size} polls=${this.pollCount} lastPoll=${this.lastPollAt} dur=${this.lastPollDurationMs}ms err=${this.lastError || 'none'}`), 60000); this.statusTimer.unref(); this.lastPollAt = null; this.lastError = null;
-    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, goplus: 0, tracker: 0 };
+    this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null;
     this.lastRequestStatus = null;
     this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
     this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null; this.openSymbolsCache = [];
@@ -22,8 +22,8 @@ class DexWatcher {
     return true;
   }
   stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); if (this.statusTimer) clearInterval(this.statusTimer); this.timer = this.watchdog = this.statusTimer = null; }
-  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.nextAllowedPollAt = 0; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, goplus: 0, tracker: 0 }; }
-  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
+  reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.nextAllowedPollAt = 0; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null; }
+  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, lastRpcError: this.lastRpcError, onChainCacheSize: this.onChainCache.size, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
   async request(url, options = {}) {
     const attempts = Number(options.retries ?? 2); const requestOptions = { timeout: 10000, headers: { 'User-Agent': 'Solana-DexPaprika-Watcher/1.0', 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options }; delete requestOptions.retries;
     for (let attempt = 0; attempt <= attempts; attempt += 1) {
@@ -100,10 +100,34 @@ class DexWatcher {
     const allowedList = ALLOWED_DEXES_BY_MODE[dex.allowedDexes || 'all'] ?? null;
     if (allowedList && !allowedList.includes(String(candidate.dexName).toLowerCase())) return fail('الـ DEX غير مسموح', 'dex');
     if (this.settings.dex.antiDuplicate !== false) { const existingSymbols = this.openSymbolsCache || []; const candidateSymbol = String(candidate.symbol || '').trim().toUpperCase(); if (candidateSymbol && existingSymbols.includes(candidateSymbol)) return fail(`رمز مكرر (${candidateSymbol})`, 'dex'); }
+    if (this.settings.onchain?.enabled === true) { const onChainResult = await this.checkOnChain(candidate.mint); if (!onChainResult.passed) return fail(onChainResult.reason, 'onchain'); candidate.onChainData = onChainResult.data; }
     if (this.settings.tracker.enabled && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
     if (this.settings.goplus.enabled) { const result = await this.goplus(candidate.mint); if (result && !this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
     if (this.settings.tracker.enabled) { const result = await this.tracker(candidate.mint); if (result && !this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     this.lastCandidate = candidate; this.passCount += 1; await this.onCandidate(candidate); return true;
+  }
+  async checkOnChain(mint) {
+    const cached = this.onChainCache.get(mint);
+    if (cached && Date.now() - cached.timestamp < 3600000) return cached.result;
+    const result = { passed: true, reason: null, data: {} };
+    try {
+      const rpcUrl = process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+      const conn = new Connection(rpcUrl, 'confirmed');
+      const mintInfo = await conn.getParsedAccountInfo(new PublicKey(mint));
+      const info = mintInfo.value?.data?.parsed?.info;
+      if (!info) { result.passed = false; result.reason = 'لا يمكن قراءة بيانات Mint'; }
+      else {
+        result.data = { mintAuthority: info.mintAuthority ?? null, freezeAuthority: info.freezeAuthority ?? null, supply: Number(info.supply || 0), decimals: Number(info.decimals || 0) };
+        const oc = this.settings.onchain || {};
+        if (oc.checkAuthorities !== false && (info.mintAuthority !== null || info.freezeAuthority !== null)) { result.passed = false; result.reason = info.mintAuthority !== null ? 'Mint Authority مفتوح' : 'Freeze Authority مفتوح'; }
+        if (result.passed && oc.checkTop10 !== false && Number(oc.maxTop10Pct || 0) > 0) { const rows = (await conn.getTokenLargestAccounts(new PublicKey(mint))).value || []; const top10 = rows.slice(0, 10).reduce((sum, row) => sum + Number(row.amount || 0), 0); const pct = result.data.supply > 0 ? top10 / result.data.supply * 100 : 0; result.data.top10Pct = pct; if (pct > Number(oc.maxTop10Pct)) { result.passed = false; result.reason = `تركيز Top 10: ${pct.toFixed(1)}% > ${oc.maxTop10Pct}%`; } }
+        if (result.passed && oc.checkSupply === true && Number(oc.maxSupply) > 0 && result.data.supply > Number(oc.maxSupply)) { result.passed = false; result.reason = `Supply ${result.data.supply} > ${oc.maxSupply}`; }
+        if (result.passed && oc.checkDecimals === true && Number(oc.maxDecimals) > 0 && result.data.decimals > Number(oc.maxDecimals)) { result.passed = false; result.reason = `Decimals ${result.data.decimals} > ${oc.maxDecimals}`; }
+      }
+      this.onChainCache.set(mint, { result, timestamp: Date.now() });
+      if (this.onChainCache.size > 5000) this.onChainCache.delete(this.onChainCache.keys().next().value);
+      return result;
+    } catch (error) { this.lastRpcError = error.message; return { passed: true, reason: null, data: { rpcError: error.message } }; }
   }
   async checkDeployerReputation(mint, creator) { const apiKey = process.env.SOLANA_TRACKER_API_KEY; const apiUrl = process.env.SOLANA_TRACKER_API_URL; if (!apiKey || !apiUrl || !creator) return { passed: true }; try { const { data } = await axios.get(`${apiUrl.replace(/\/$/, '')}/deployer/${creator}`, { headers: { 'x-api-key': apiKey }, timeout: 6000 }); const tokens = Array.isArray(data?.tokens) ? data.tokens : []; if (tokens.length > 20) return { passed: false, reason: `المنشئ أصدر ${tokens.length} عملة` }; return { passed: true, count: tokens.length }; } catch (_) { return { passed: true }; } }
   async goplus(mint) { return this.request(process.env.GOPLUS_API_URL || `https://api.gopluslabs.io/api/v1/token_security/solana?contract_addresses=${mint}`, { headers: process.env.GOPLUS_API_KEY ? { Authorization: `Bearer ${process.env.GOPLUS_API_KEY}` } : {} }).then((d) => d?.result?.[mint] || null); }
