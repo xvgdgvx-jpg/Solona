@@ -12,6 +12,7 @@ const defaults = {
   tracker: { enabled: false, maxRiskScore: 3, rejectRugged: true, maxDeveloperHoldingPct: 15, maxSnipersPct: 15, maxInsidersPct: 15, maxBundlersPct: 30, maxTop10Pct: 25, minHolders: 100, maxDeveloperTokens: 0 },
   risk: { stopLossPct: 10, capitalProtection: '50@-10', timedSellMin: 0, emergencyBreaker: true, dailyLossPct: 0 },
   lastMint: null, lastFilterResult: 'لم يبدأ الفحص بعد', rejectStats: {}, checkedCount: 0, lastCheckAt: null,
+  tradeAttempts: 0, tradeSuccesses: 0, tradeFailures: 0, lastTradeError: null,
 };
 
 function merge(base, value) {
