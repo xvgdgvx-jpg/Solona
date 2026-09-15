@@ -131,7 +131,8 @@ async function monitorPositions() {
     }
   } finally { monitorBusy = false; }
 }
-function startMonitor() { if (monitorTimer) return; console.log('[monitor] Starting (30s interval)'); monitorTimer = setInterval(monitorPositions, 30000); monitorTimer.unref(); setTimeout(monitorPositions, 5000).unref(); }
+const MONITOR_INTERVAL_MS = Math.max(2000, Number(process.env.AUTO_SELL_INTERVAL_MS || 2000));
+function startMonitor() { if (monitorTimer) return; console.log(`[monitor] Starting (${MONITOR_INTERVAL_MS}ms interval)`); monitorTimer = setInterval(() => monitorPositions().catch((error) => console.error(`[monitor] cycle failed: ${error.message}`)), MONITOR_INTERVAL_MS); monitorTimer.unref(); monitorPositions().catch((error) => console.error(`[monitor] initial cycle failed: ${error.message}`)); }
 function stopMonitor() { if (monitorTimer) clearInterval(monitorTimer); monitorTimer = null; console.log('[monitor] Stopped'); }
 
 const boot = settings();
