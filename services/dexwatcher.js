@@ -1,6 +1,16 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const percentFromRawAmounts = (part, total) => {
+  try {
+    const numerator = BigInt(String(part));
+    const denominator = BigInt(String(total));
+    if (denominator <= 0n || numerator < 0n) return null;
+    return Number(numerator * 1000000n / denominator) / 10000;
+  } catch (_) {
+    return null;
+  }
+};
 const SOL_MINT_ADDR = 'So11111111111111111111111111111111111111112';
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const ALLOWED_DEXES_BY_MODE = { raydium: ['raydium'], raydium_orca: ['raydium', 'orca'], raydium_orca_meteora: ['raydium', 'orca', 'meteora_daam_v2', 'meteora_dbc'], all: null };
@@ -125,7 +135,13 @@ class DexWatcher {
         result.data = { mintAuthority: info.mintAuthority ?? null, freezeAuthority: info.freezeAuthority ?? null, supply: Number(info.supply || 0), decimals: Number(info.decimals || 0), updateAuthority: null };
         const oc = this.settings.onchain || {};
         if (oc.checkAuthorities !== false && (info.mintAuthority !== null || info.freezeAuthority !== null)) { result.passed = false; result.reason = info.mintAuthority !== null ? 'Mint Authority مفتوح' : 'Freeze Authority مفتوح'; }
-        if (result.passed && oc.checkTop10 !== false && Number(oc.maxTop10Pct || 0) > 0) { const rows = (await conn.getTokenLargestAccounts(new PublicKey(mint))).value || []; const top10 = rows.slice(0, 10).reduce((sum, row) => sum + Number(row.amount || 0), 0); const pct = result.data.supply > 0 ? top10 / result.data.supply * 100 : 0; result.data.top10Pct = pct; if (pct > Number(oc.maxTop10Pct)) { result.passed = false; result.reason = `تركيز Top 10: ${pct.toFixed(1)}% > ${oc.maxTop10Pct}%`; } }
+        if (result.passed && oc.checkTop10 !== false && Number(oc.maxTop10Pct || 0) > 0) {
+          const rows = (await conn.getTokenLargestAccounts(new PublicKey(mint))).value || [];
+          const top10Raw = rows.slice(0, 10).reduce((sum, row) => sum + BigInt(String(row.amount || '0')), 0n);
+          const pct = percentFromRawAmounts(top10Raw, info.supply);
+          if (pct === null) { result.passed = false; result.reason = 'تعذر حساب تركيز Top 10 من بيانات السلسلة'; }
+          else { result.data.top10Pct = pct; result.data.top10Raw = top10Raw.toString(); result.data.top10Accounts = Math.min(rows.length, 10); if (pct > Number(oc.maxTop10Pct)) { result.passed = false; result.reason = `تركيز Top 10: ${pct.toFixed(2)}% > ${oc.maxTop10Pct}%`; } }
+        }
         if (result.passed && oc.checkSupply === true && Number(oc.maxSupply) > 0 && result.data.supply > Number(oc.maxSupply)) { result.passed = false; result.reason = `Supply ${result.data.supply} > ${oc.maxSupply}`; }
         if (result.passed && oc.checkDecimals === true && Number(oc.maxDecimals) > 0 && result.data.decimals > Number(oc.maxDecimals)) { result.passed = false; result.reason = `Decimals ${result.data.decimals} > ${oc.maxDecimals}`; }
         if (result.passed && oc.checkUpdateAuthority === true) { try { const [metadataAddress] = PublicKey.findProgramAddressSync([Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), new PublicKey(mint).toBuffer()], METADATA_PROGRAM_ID); const metadata = await conn.getAccountInfo(metadataAddress); if (metadata?.data?.length >= 33) { const authority = new PublicKey(metadata.data.subarray(1, 33)); result.data.updateAuthority = authority.toBase58(); if (!authority.equals(PublicKey.default)) { result.passed = false; result.reason = 'Update Authority مفتوح'; } } } catch (metadataError) { result.data.updateAuthorityError = metadataError.message; } }
