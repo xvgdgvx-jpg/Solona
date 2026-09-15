@@ -164,5 +164,16 @@ function stopMonitor() { if (monitorTimer) clearInterval(monitorTimer); monitorT
 const boot = settings();
 if (process.env.AUTO_START_WATCHER !== 'false' && !boot.killSwitch) boot.autoWatcherEnabled = true;
 watcher.updateSettings(boot);
-if (boot.autoWatcherEnabled && !boot.killSwitch) { save(boot); watcher.start(); if (boot.autoSellEnabled) startMonitor(); console.log(`[watcher] auto-started on boot; status=${JSON.stringify(watcher.status())}`); }
+const BOOT_GRACE_MS = Math.max(0, Number(process.env.BOOT_GRACE_MS || 15000));
+if (boot.autoWatcherEnabled && !boot.killSwitch) {
+  save(boot);
+  const startAutomation = () => {
+    if (boot.killSwitch) return;
+    watcher.start();
+    if (settings().autoSellEnabled) startMonitor();
+    console.log(`[watcher] auto-started on boot after ${BOOT_GRACE_MS}ms; status=${JSON.stringify(watcher.status())}`);
+  };
+  if (BOOT_GRACE_MS > 0) { console.log(`[watcher] boot grace: delaying automation ${BOOT_GRACE_MS}ms`); setTimeout(startAutomation, BOOT_GRACE_MS).unref(); }
+  else startAutomation();
+}
 module.exports = bot; module.exports.getMonitorTimer = () => monitorTimer; module.exports.getMonitorBusy = () => monitorBusy; module.exports.startWatcher = () => { const s = settings(); s.autoWatcherEnabled = true; save(s); watcher.updateSettings(s); return watcher.start(); }; module.exports.watcher = watcher;
