@@ -138,6 +138,11 @@ async function monitorPositions() {
         autoSellMints.add(pos.mint);
         const result = await closePosition({ adminId: config.adminId, key: config.encryptionKey, positionId: pos.id, fraction: action.fraction, jupiterUrl: config.jupiterUrl, rpcUrl: config.rpcUrl, ownerSecret: config.masterPrivateKey });
         if (!result) return;
+        const persistedPosition = getPositions(config.adminId, config.encryptionKey).find((candidate) => candidate.id === pos.id);
+        if (action.fraction >= 1 && persistedPosition?.status !== 'closed') {
+          console.error(`[monitor] رفض إشعار بيع غير مؤكد: ${pos.mint} status=${persistedPosition?.status || 'missing'}`);
+          return;
+        }
         const latest = settings();
         const soldFraction = Number(action.fraction || 1);
         if (pos.mode !== 'live') latest.paperAvailableSol = Number(latest.paperAvailableSol || 0) + Number(result.currentSol || 0);

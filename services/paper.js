@@ -13,7 +13,19 @@ function withPositionsLock(fn) {
 function savePositionsUnlocked(adminId, positions, key) {
   const user = getUser(adminId, key);
   const existing = user.paperPositions || [];
-  const merged = existing.map((old) => positions.find((p) => p.id === old.id) || old);
+  const incomingById = new Map(positions.map((position) => [position.id, position]));
+  const merged = existing.map((old) => {
+    const incoming = incomingById.get(old.id);
+    if (!incoming) return old;
+    const oldUpdatedAt = Number(old.updatedAt || 0);
+    const incomingUpdatedAt = Number(incoming.updatedAt || 0);
+    const stale = incomingUpdatedAt > 0 && oldUpdatedAt > incomingUpdatedAt;
+    const staleReopen = (old.status === 'closing' || old.status === 'closed')
+      && incoming.status === 'open'
+      && incoming.reopenRequested !== true;
+    if (stale || staleReopen) return old;
+    return incoming;
+  });
   for (const position of positions) {
     if (!merged.find((item) => item.id === position.id)) merged.push(position);
   }
@@ -193,6 +205,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
         currentPosition.tp1Sold = true;
         currentPosition.status = 'open';
       }
+      delete currentPosition.reopenRequested;
       currentPosition.updatedAt = Date.now();
       savePositionsUnlocked(adminId, currentPositions, key);
       return { currentSol, pnlSol, pnlPct, fraction, signature: swapResult.signature, feeLamports: Number(swapResult.feeLamports || 0), feeSol: Number(swapResult.feeSol || 0) };
@@ -214,6 +227,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
       currentPosition.status = 'open';
     }
     currentPosition.consecutivePricingErrors = 0;
+    delete currentPosition.reopenRequested;
     currentPosition.lastPricingAt = Date.now();
     currentPosition.updatedAt = Date.now();
     savePositionsUnlocked(adminId, currentPositions, key);
@@ -223,6 +237,7 @@ async function closePosition({ adminId, key, positionId, fraction = 1, jupiterUr
     const currentPosition = currentPositions.find((p) => p.id === positionId && p.status === 'closing');
     if (currentPosition) {
       currentPosition.status = 'open';
+      currentPosition.reopenRequested = true;
       currentPosition.consecutivePricingErrors = (currentPosition.consecutivePricingErrors || 0) + 1;
       currentPosition.lastPricingAt = Date.now();
       currentPosition.updatedAt = Date.now();
