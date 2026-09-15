@@ -1,7 +1,7 @@
 const { getUser, saveUser } = require('./storage');
 
 const defaults = {
-  autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, killSwitch: false,
+  autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, autoSellStrategy: 'takeProfit', killSwitch: false,
   paperCapitalSol: 3, paperAvailableSol: 3, paperAllocationPct: 5,
   paperTakeProfitFirstPct: 30, paperStopLossPct: 15,
   paperEvents: [], paperPnlSol: 0, liveTrading: false, tradeSizeSol: 0.1,
