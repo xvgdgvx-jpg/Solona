@@ -23,4 +23,8 @@ assert.match(source, /stopMonitor\(\); watcher\.stop\(\)/);
 assert.match(source, /if \(wasRunning\) watcher\.start\(\)/);
 assert.match(source, /if \(wasRunning && s\.autoSellEnabled\) startMonitor\(\)/);
 assert.match(source, /catch \(error\).*فشلت إعادة الضبط/s);
+assert.match(source, /takeProfitPct/);
+assert.match(source, /جني أرباح كامل \+.*fraction: 1/);
+assert.doesNotMatch(source, /fraction: 0\.5/);
+assert.doesNotMatch(source, /paperTakeProfitFinalPct/);
 console.log(`button graph: ${exactRoutes.length} routes and reset lifecycle verified`);
