@@ -22,6 +22,12 @@ function savePositionsUnlocked(adminId, positions, key) {
 function savePositions(adminId, positions, key) {
   return withPositionsLock(() => savePositionsUnlocked(adminId, positions, key));
 }
+function replacePositions(adminId, positions, key) {
+  return withPositionsLock(() => {
+    const user = getUser(adminId, key);
+    saveUser(adminId, { ...user, paperPositions: Array.isArray(positions) ? positions : [] }, key);
+  });
+}
 let priceCache = { data: null, timestamp: 0 };
 const PRICE_CACHE_MS = 50;
 
@@ -244,4 +250,4 @@ function cleanupStaleClosing(adminId, key) {
   });
 }
 
-module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, savePositions, cleanupStaleClosing };
+module.exports = { openPosition, refreshSinglePosition, refreshPositions, refreshPositionsCached, closePosition, getPositions, savePositions, replacePositions, cleanupStaleClosing };
