@@ -20,7 +20,7 @@ class DexWatcher {
     this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
     this.running = false; this.timer = null; this.watchdog = null; this.statusTimer = setInterval(() => console.log(`[dexwatcher-status] checked=${this.checkedCount} seen=${this.seen.size} polls=${this.pollCount} lastPoll=${this.lastPollAt} dur=${this.lastPollDurationMs}ms err=${this.lastError || 'none'}`), 60000); this.statusTimer.unref(); this.lastPollAt = null; this.lastError = null;
     this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null; this.adminId = process.env.ADMIN_TELEGRAM_ID; this.encryptionKey = Buffer.from(process.env.ENCRYPTION_KEY || '', 'hex');
-    this.lastRequestStatus = null;
+    this.lastRequestStatus = null; this.uniqueMintsLastPoll = 0;
     this.discoveryUrl = process.env.DEXPAPRIKA_URL || 'https://api.dexpaprika.com/networks/solana/pools/search';
     this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null; this.openSymbolsCache = [];
   }
@@ -34,7 +34,7 @@ class DexWatcher {
   }
   stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); if (this.statusTimer) clearInterval(this.statusTimer); this.timer = this.watchdog = this.statusTimer = null; }
   reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.nextAllowedPollAt = 0; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null; }
-  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, lastRpcError: this.lastRpcError, onChainCacheSize: this.onChainCache.size, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
+  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, lastRpcError: this.lastRpcError, uniqueMintsLastPoll: this.uniqueMintsLastPoll || 0, onChainCacheSize: this.onChainCache.size, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
   async request(url, options = {}) {
     const attempts = Number(options.retries ?? 2); const requestOptions = { timeout: 10000, headers: { 'User-Agent': 'Solana-DexPaprika-Watcher/1.0', 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options }; delete requestOptions.retries;
     for (let attempt = 0; attempt <= attempts; attempt += 1) {
@@ -49,28 +49,48 @@ class DexWatcher {
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
-    this.pollInFlight = true; this.lastPollStarted = Date.now(); const startedAt = this.lastPollStarted; this.lastPollAt = startedAt; this.pollCount = (this.pollCount || 0) + 1; let newCount = 0;
+    this.pollInFlight = true;
+    this.lastPollStarted = Date.now();
+    const startedAt = this.lastPollStarted;
+    this.lastPollAt = startedAt;
+    this.pollCount = (this.pollCount || 0) + 1;
+    let newCount = 0;
     try {
-      const createdAfter = Math.floor(Date.now() / 1000) - 3600;
-      const params = { order_by: 'created_at', sort: 'desc', limit: 50, detailed: true, created_after: createdAfter };
+      const params = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true };
       this.lastRequestStatus = null;
       const requestStart = Date.now();
       let data = await this.request(this.discoveryUrl, { params });
       this.lastRequestDurationMs = Date.now() - requestStart;
       if (!data && this.lastRequestStatus === 400) {
-        console.warn('[dexwatcher] DexPaprika rejected order_by — check API docs');
+        console.warn('[dexwatcher] DexPaprika rejected order_by — retrying with price change order');
         this.lastRequestStatus = null;
         data = await this.request(this.discoveryUrl, { params: { ...params, order_by: 'price_change_percentage_5m' } });
       }
       if (!data) { this.nextAllowedPollAt = Date.now() + 60000; return; }
       const pools = Array.isArray(data) ? data : (data?.results || data?.pools || data?.data || []);
       console.log(`[dexwatcher] poll#${this.pollCount} fetched=${pools.length}`);
+
       const mode = this.settings.dex.allowedDexes || 'all';
       const allowedList = ALLOWED_DEXES_BY_MODE[mode] ?? null;
-      const queue = pools.filter((pool) => {
-        const poolDex = String(pool?.dex_id || '').toLowerCase();
-        return !allowedList || allowedList.includes(poolDex);
-      });
+      const bestPoolByMint = new Map();
+      for (const pool of pools) {
+        const tokens = Array.isArray(pool?.tokens) ? pool.tokens : [];
+        const token = tokens.find((item) => item?.id && item.id !== SOL_MINT_ADDR) || tokens[0];
+        const mint = token?.id;
+        if (!mint || mint === SOL_MINT_ADDR) continue;
+        const poolDex = String(pool?.dex_id || pool?.dex_name || '').toLowerCase();
+        if (allowedList && !allowedList.includes(poolDex)) continue;
+        const liquidityUsd = Number(pool?.liquidity_usd || 0);
+        const existing = bestPoolByMint.get(mint);
+        if (!existing || liquidityUsd > existing.liquidityUsd) bestPoolByMint.set(mint, { pool, liquidityUsd });
+      }
+      this.uniqueMintsLastPoll = bestPoolByMint.size;
+      console.log(`[dexwatcher] poll#${this.pollCount} unique_mints=${this.uniqueMintsLastPoll}`);
+      for (const [mint, dataByMint] of bestPoolByMint) {
+        if (dataByMint.liquidityUsd < 100) console.log(`[aggregate] ${mint}: only pool liq=$${dataByMint.liquidityUsd.toFixed(2)} (best available)`);
+      }
+
+      const queue = Array.from(bestPoolByMint.values(), (item) => item.pool);
       const CONCURRENCY = 10;
       const workers = Array.from({ length: Math.min(CONCURRENCY, Math.max(1, queue.length)) }, async () => {
         while (queue.length) {
@@ -79,13 +99,22 @@ class DexWatcher {
           const candidate = this.loadCandidate(pool);
           if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || this.seen.has(candidate.mint)) continue;
           this.seen.add(candidate.mint);
-          this.checkedCount += 1; this.checked = this.checkedCount; newCount += 1;
+          this.checkedCount += 1;
+          this.checked = this.checkedCount;
+          newCount += 1;
           try { await this.evaluate(candidate); } catch (error) { console.error('[eval] ' + error.message); }
         }
       });
       await Promise.all(workers);
-    } catch (error) { this.lastError = error.message; this.onError(error); }
-    finally { this.lastPollDurationMs = Date.now() - startedAt; this.lastPollAt = new Date().toISOString(); console.log(`[dexwatcher] poll#${this.pollCount} done — new=${typeof newCount === 'number' ? newCount : 0} checked=${this.checkedCount} seen=${this.seen.size} duration=${this.lastPollDurationMs}ms`); this.pollInFlight = false; }
+    } catch (error) {
+      this.lastError = error.message;
+      this.onError(error);
+    } finally {
+      this.lastPollDurationMs = Date.now() - startedAt;
+      this.lastPollAt = new Date().toISOString();
+      console.log(`[dexwatcher] poll#${this.pollCount} done — new=${newCount} checked=${this.checkedCount} seen=${this.seen.size} duration=${this.lastPollDurationMs}ms`);
+      this.pollInFlight = false;
+    }
   }
   loadCandidate(pool) {
     try {
@@ -96,7 +125,7 @@ class DexWatcher {
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
       const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
       const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
-      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, creator: pool.creator || pool.created_by || token.creator || token.created_by || null, dexName: pool.dex_id || pool.dex_name, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, creator: pool.creator || pool.created_by || token.creator || token.created_by || null, dexName: pool.dex_name || pool.dex_id, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
