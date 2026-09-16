@@ -13,7 +13,14 @@ const percentFromRawAmounts = (part, total) => {
 };
 const SOL_MINT_ADDR = 'So11111111111111111111111111111111111111112';
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
-const ALLOWED_DEXES_BY_MODE = { raydium: ['raydium'], raydium_orca: ['raydium', 'orca'], raydium_orca_meteora: ['raydium', 'orca', 'meteora_daam_v2', 'meteora_dbc'], all: null };
+const ALLOWED_DEXES_BY_MODE = { raydium: ['raydium'], raydium_orca: ['raydium', 'orca'], raydium_orca_meteora: ['raydium', 'orca', 'meteora', 'meteora_daam_v2', 'meteora_dbc'], all: null };
+function normalizedDexId(value) {
+  const id = String(value || '').trim().toLowerCase().replace(/[-\s]/g, '_');
+  if (id === 'raydium' || id.startsWith('raydium_')) return 'raydium';
+  if (id === 'orca' || id.startsWith('orca_') || id.startsWith('orca_whirlpool')) return 'orca';
+  if (id === 'meteora' || id.startsWith('meteora_')) return id.includes('dbc') ? 'meteora_dbc' : id.includes('daam') || id.includes('dlmm') ? 'meteora_daam_v2' : 'meteora';
+  return id;
+}
 
 class DexWatcher {
   constructor({ settings, getSettings, onCandidate, onError, onFilter }) {
@@ -110,7 +117,7 @@ class DexWatcher {
         const token = tokens.find((item) => item?.id && item.id !== SOL_MINT_ADDR) || tokens[0];
         const mint = token?.id;
         if (!mint || mint === SOL_MINT_ADDR) continue;
-        const poolDex = String(pool?.dex_id || pool?.dex_name || '').toLowerCase();
+        const poolDex = normalizedDexId(pool?.dex_id || pool?.dex_name);
         if (allowedList && !allowedList.includes(poolDex)) continue;
         const liquidityUsd = Number(pool?.liquidity_usd || 0);
         const existing = bestPoolByMint.get(mint);
@@ -164,14 +171,23 @@ class DexWatcher {
     const currentSettings = this.refreshSettings();
     const dex = currentSettings.dex || {};
     const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
+    const threshold = (value) => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : 0; };
+    const minAgeSec = threshold(dex.minAgeSec);
+    const maxAgeSec = threshold(dex.maxAgeSec);
+    const minVolumeUsd = threshold(dex.minVolumeUsd);
+    const minLiquidityUsd = threshold(dex.minLiquidityUsd);
+    const minBuys24h = threshold(dex.minBuys24h);
+    const minBuySellRatio = threshold(dex.minBuySellRatio);
+    const minMarketCapUsd = threshold(dex.minMarketCapUsd);
+    const maxMarketCapUsd = threshold(dex.maxMarketCapUsd);
     const fail = (reason, stage) => { const key = `${stage}: ${reason}`; this.rejectStats[key] = (this.rejectStats[key] || 0) + 1; this.rejectCount += 1; this.rejectByStage[stage] = (this.rejectByStage[stage] || 0) + 1; this.onFilter(candidate, reason, stage); return false; };
     if (!candidate.mint || (() => { try { new PublicKey(candidate.mint); return false; } catch (_) { return true; } })()) return fail('عنوان العملة غير صالح', 'dex');
-    if (age != null && (age < Number(dex.minAgeSec) || (Number(dex.maxAgeSec) > 0 && age > Number(dex.maxAgeSec)))) return fail('العمر خارج الحدود', 'dex');
-    if (candidate.volumeUsd < Number(dex.minVolumeUsd) || candidate.liquidityUsd < Number(dex.minLiquidityUsd)) return fail('الحجم أو السيولة أقل من الحد', 'dex');
-    if (candidate.dexBuys < Number(dex.minBuys24h) || candidate.buySellRatio < Number(dex.minBuySellRatio)) return fail('المشتريات أو نسبة الشراء/البيع أقل من الحد', 'dex');
-    if (candidate.marketCapUsd < Number(dex.minMarketCapUsd) || (Number(dex.maxMarketCapUsd) > 0 && candidate.marketCapUsd > Number(dex.maxMarketCapUsd))) return fail('القيمة السوقية خارج الحدود', 'dex');
+    if (age != null && (age < minAgeSec || (maxAgeSec > 0 && age > maxAgeSec))) return fail('العمر خارج الحدود', 'dex');
+    if (Number(candidate.volumeUsd || 0) < minVolumeUsd || Number(candidate.liquidityUsd || 0) < minLiquidityUsd) return fail('الحجم أو السيولة أقل من الحد', 'dex');
+    if (Number(candidate.dexBuys || 0) < minBuys24h || Number(candidate.buySellRatio || 0) < minBuySellRatio) return fail('المشتريات أو نسبة الشراء/البيع أقل من الحد', 'dex');
+    if (Number(candidate.marketCapUsd || 0) < minMarketCapUsd || (maxMarketCapUsd > 0 && Number(candidate.marketCapUsd || 0) > maxMarketCapUsd)) return fail('القيمة السوقية خارج الحدود', 'dex');
     const allowedList = ALLOWED_DEXES_BY_MODE[dex.allowedDexes || 'all'] ?? null;
-    if (allowedList && !allowedList.includes(String(candidate.dexName).toLowerCase())) return fail('الـ DEX غير مسموح', 'dex');
+    if (allowedList && !allowedList.includes(normalizedDexId(candidate.dexName))) return fail(`الـ DEX غير مسموح: ${candidate.dexName || 'غير معروف'} (المسموح: ${dex.allowedDexes})`, 'dex');
     if (dex.antiDuplicate !== false) { const { getPositions } = require('./paper'); const openPositions = getPositions(this.adminId, this.encryptionKey).filter((p) => p.status === 'open'); const candidateSymbol = String(candidate.symbol || '').trim().toUpperCase(); if (candidateSymbol && openPositions.some((p) => String(p.symbol || '').trim().toUpperCase() === candidateSymbol)) return fail(`رمز مكرر (${candidateSymbol})`, 'dex'); }
     const oc = currentSettings.onchain || {};
     if (oc.enabled === true) { const onChainResult = await this.checkOnChain(candidate.mint); if (onChainResult.data?.rpcError) { this.lastRpcError = onChainResult.data.rpcError; return fail('On-Chain: RPC error', 'onchain'); } if (!onChainResult.passed) return fail(onChainResult.reason, 'onchain'); candidate.onChainData = onChainResult.data; }
