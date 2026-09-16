@@ -25,6 +25,10 @@ class DexWatcher {
     this.nextAllowedPollAt = 0; this.lastRateLimitNoticeAt = 0; this.lastRequestStatus = null; this.openSymbolsCache = [];
   }
   updateSettings(settings) { this.settings = settings; }
+  refreshSettings() {
+    if (this.getSettings) this.settings = this.getSettings();
+    return this.settings;
+  }
   start() {
     if (this.running) return true;
     this.running = true; this.poll();
@@ -49,7 +53,8 @@ class DexWatcher {
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
-    if (this.getSettings) this.settings = this.getSettings();
+    this.refreshSettings();
+    if (!this.settings || this.settings.autoWatcherEnabled === false || this.settings.killSwitch === true) return;
     this.pollInFlight = true;
     this.lastPollStarted = Date.now();
     const startedAt = this.lastPollStarted;
@@ -156,25 +161,25 @@ class DexWatcher {
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
-    const dex = this.settings.dex; const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
+    const currentSettings = this.refreshSettings();
+    const dex = currentSettings.dex || {};
+    const age = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : null;
     const fail = (reason, stage) => { const key = `${stage}: ${reason}`; this.rejectStats[key] = (this.rejectStats[key] || 0) + 1; this.rejectCount += 1; this.rejectByStage[stage] = (this.rejectByStage[stage] || 0) + 1; this.onFilter(candidate, reason, stage); return false; };
     if (!candidate.mint || (() => { try { new PublicKey(candidate.mint); return false; } catch (_) { return true; } })()) return fail('عنوان العملة غير صالح', 'dex');
     if (age != null && (age < Number(dex.minAgeSec) || (Number(dex.maxAgeSec) > 0 && age > Number(dex.maxAgeSec)))) return fail('العمر خارج الحدود', 'dex');
     if (candidate.volumeUsd < Number(dex.minVolumeUsd) || candidate.liquidityUsd < Number(dex.minLiquidityUsd)) return fail('الحجم أو السيولة أقل من الحد', 'dex');
     if (candidate.dexBuys < Number(dex.minBuys24h) || candidate.buySellRatio < Number(dex.minBuySellRatio)) return fail('المشتريات أو نسبة الشراء/البيع أقل من الحد', 'dex');
     if (candidate.marketCapUsd < Number(dex.minMarketCapUsd) || (Number(dex.maxMarketCapUsd) > 0 && candidate.marketCapUsd > Number(dex.maxMarketCapUsd))) return fail('القيمة السوقية خارج الحدود', 'dex');
-    if (dex.allowedDexes === 'raydium' && String(candidate.dexName).toLowerCase() !== 'raydium') return fail('الـ DEX غير مسموح', 'dex');
     const allowedList = ALLOWED_DEXES_BY_MODE[dex.allowedDexes || 'all'] ?? null;
     if (allowedList && !allowedList.includes(String(candidate.dexName).toLowerCase())) return fail('الـ DEX غير مسموح', 'dex');
-    if (this.settings.dex.antiDuplicate !== false) { const { getPositions } = require('./paper'); const openPositions = getPositions(this.adminId, this.encryptionKey).filter((p) => p.status === 'open'); const candidateSymbol = String(candidate.symbol || '').trim().toUpperCase(); if (candidateSymbol && openPositions.some((p) => String(p.symbol || '').trim().toUpperCase() === candidateSymbol)) return fail(`رمز مكرر (${candidateSymbol})`, 'dex'); }
-    const oc = this.settings.onchain || {};
+    if (dex.antiDuplicate !== false) { const { getPositions } = require('./paper'); const openPositions = getPositions(this.adminId, this.encryptionKey).filter((p) => p.status === 'open'); const candidateSymbol = String(candidate.symbol || '').trim().toUpperCase(); if (candidateSymbol && openPositions.some((p) => String(p.symbol || '').trim().toUpperCase() === candidateSymbol)) return fail(`رمز مكرر (${candidateSymbol})`, 'dex'); }
+    const oc = currentSettings.onchain || {};
     if (oc.enabled === true) { const onChainResult = await this.checkOnChain(candidate.mint); if (onChainResult.data?.rpcError) { this.lastRpcError = onChainResult.data.rpcError; return fail('On-Chain: RPC error', 'onchain'); } if (!onChainResult.passed) return fail(onChainResult.reason, 'onchain'); candidate.onChainData = onChainResult.data; }
-    const ageSec = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : 0;
-    const gp = this.settings.goplus || {};
+    const gp = currentSettings.goplus || {};
     if (gp.enabled === true) { const result = await this.goplus(candidate.mint); if (!result) return fail('GoPlus: لا توجد بيانات', 'goplus'); if (!this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
-    const tk = this.settings.tracker || {};
+    const tk = currentSettings.tracker || {};
     if (tk.enabled === true) { const result = await this.tracker(candidate.mint); if (!result) return fail('Tracker: لا توجد بيانات', 'tracker'); if (!this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
-    if (this.settings.tracker.enabled && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
+    if (tk.enabled === true && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
     this.lastCandidate = candidate; this.passCount += 1; await this.onCandidate(candidate); return true;
   }
   async checkOnChain(mint) {

@@ -72,7 +72,7 @@ bot.command(['start','menu'], async (ctx) => { if (!isAdmin(ctx)) return; await 
 bot.callbackQuery('home', async (ctx) => { await safeAnswer(ctx); await renderDashboard(ctx); });
 bot.callbackQuery('dashboard', async (ctx) => { await safeAnswer(ctx); await renderDashboard(ctx); });
 bot.callbackQuery('watch:on', async (ctx) => { await safeAnswer(ctx, 'تم التشغيل'); if (!isAdmin(ctx)) return; const s = settings(); s.autoWatcherEnabled = true; s.killSwitch = false; await save(s); watcher.updateSettings(s); watcher.start(); if (s.autoSellEnabled) startMonitor(); console.log(`[watcher] enabled; status=${JSON.stringify(watcher.status())}`); await renderDashboard(ctx); });
-bot.callbackQuery('watch:off', async (ctx) => { await safeAnswer(ctx, 'تم الإيقاف'); if (!isAdmin(ctx)) return; const s = settings(); s.autoWatcherEnabled = false; await save(s); watcher.stop(); stopMonitor(); await renderDashboard(ctx); });
+bot.callbackQuery('watch:off', async (ctx) => { await safeAnswer(ctx, 'تم الإيقاف'); if (!isAdmin(ctx)) return; const s = settings(); s.autoWatcherEnabled = false; s.killSwitch = false; await save(s); watcher.updateSettings(s); watcher.stop(); stopMonitor(); await renderDashboard(ctx); });
 bot.callbackQuery('settings', async (ctx) => { await safeAnswer(ctx); await show(ctx, '⚙️ الإعدادات', settingsKeyboard(settings())); });
 bot.callbackQuery('filters', async (ctx) => { await safeAnswer(ctx); await show(ctx, '⚙️ فلاتر الحماية', filtersKeyboard(settings())); });
 for (const section of ['onchain', 'goplus', 'tracker']) bot.callbackQuery(`toggle-filter:${section}`, async (ctx) => { await safeAnswer(ctx, 'جارٍ الحفظ'); if (!isAdmin(ctx)) return; const s = settings(); s[section].enabled = !Boolean(s[section].enabled); await save(s); watcher.updateSettings(s); await show(ctx, `⚙️ فلاتر الحماية\n\n✅ تم ${s[section].enabled ? 'تفعيل' : 'إيقاف'} فلتر ${section === 'onchain' ? 'On-Chain' : section === 'goplus' ? 'GoPlus' : 'Solana Tracker'}`, filtersKeyboard(s)); });
@@ -97,7 +97,7 @@ bot.callbackQuery('mode:toggle', async (ctx) => { await safeAnswer(ctx); const s
 bot.callbackQuery('mode:live', async (ctx) => { await safeAnswer(ctx); if (!isAdmin(ctx)) return; const s = settings(); s.paperTradingEnabled = false; s.liveTrading = true; await save(s); watcher.updateSettings(s); await show(ctx, '✅ تم تفعيل التداول الحقيقي.', mainKeyboard(s)); });
 bot.callbackQuery('mode:paper', async (ctx) => { await safeAnswer(ctx); if (!isAdmin(ctx)) return; const s = settings(); s.paperTradingEnabled = true; s.liveTrading = false; await save(s); watcher.updateSettings(s); await show(ctx, '✅ تم تفعيل التداول الوهمي.', mainKeyboard(s)); });
 bot.callbackQuery(/^choose:(dex|onchain|goplus|tracker|risk):(.+)$/, async (ctx) => { await safeAnswer(ctx); const section = ctx.match[1]; const key = ctx.match[2]; const options = choices[`${section}:${key}`] || [[true,'مفعّل'],[false,'معطّل']]; const k = new InlineKeyboard(); for (const [value,label] of options) k.text(label, `set:${section}:${key}:${String(value)}`).row(); k.text('🔙 إلغاء', `filters:${section}`); await show(ctx, `اختر قيمة ${key}:`, k); });
-bot.callbackQuery(/^set:(dex|onchain|goplus|tracker|risk):([^:]+):(.+)$/, async (ctx) => { await safeAnswer(ctx, 'تم الحفظ'); const [,section,key,raw] = ctx.match; const s = settings(); s[section][key] = raw === 'true' ? true : raw === 'false' ? false : Number.isNaN(Number(raw)) ? raw : Number(raw); await save(s); watcher.updateSettings(s); await show(ctx, section === 'dex' ? '📊 فلاتر DexPaprika' : section === 'onchain' ? '⛓️ فحص السلسلة المباشر' : section === 'goplus' ? '🛡️ فلاتر GoPlus' : section === 'tracker' ? '🛡️ فلاتر Solana Tracker' : '🛑 إدارة المخاطر', screen(section, s)); });
+bot.callbackQuery(/^set:(dex|onchain|goplus|tracker|risk):([^:]+):(.+)$/, async (ctx) => { await safeAnswer(ctx, 'تم الحفظ'); const [,section,key,raw] = ctx.match; const allowed = choices[`${section}:${key}`]; if (!allowed) return show(ctx, '❌ هذا الخيار غير متاح.', filtersKeyboard(settings())); const s = settings(); const selected = allowed.find(([value]) => String(value) === raw); if (!selected) return show(ctx, '❌ قيمة غير صالحة.', screen(section, s)); s[section][key] = selected[0]; await save(s); watcher.updateSettings(s); await show(ctx, section === 'dex' ? '📊 فلاتر DexPaprika' : section === 'onchain' ? '⛓️ فحص السلسلة المباشر' : section === 'goplus' ? '🛡️ فلاتر GoPlus' : section === 'tracker' ? '🛡️ فلاتر Solana Tracker' : '🛑 إدارة المخاطر', screen(section, s)); });
 bot.catch(async (e) => { console.error(`[telegram] ${e.message || e}`); try { await e.ctx.reply(`❌ تعذر تنفيذ الزر: ${e.message || 'خطأ غير معروف'}`); } catch (_) {} });
 
 let monitorTimer = null;
@@ -173,7 +173,9 @@ function startMonitor() { if (monitorTimer) return; console.log(`[monitor] Start
 function stopMonitor() { if (monitorTimer) clearInterval(monitorTimer); monitorTimer = null; console.log('[monitor] Stopped'); }
 
 const boot = settings();
-if (process.env.AUTO_START_WATCHER !== 'false' && !boot.killSwitch) boot.autoWatcherEnabled = true;
+// لا نغيّر قرار الأدمن المحفوظ عند الإقلاع. يمكن تفعيل التشغيل التلقائي صراحةً
+// عبر AUTO_START_WATCHER=true، بينما تبقى قيمة Telegram هي مصدر الحقيقة المعتاد.
+if (String(process.env.AUTO_START_WATCHER).toLowerCase() === 'true' && !boot.killSwitch) boot.autoWatcherEnabled = true;
 watcher.updateSettings(boot);
 const BOOT_GRACE_MS = Math.max(0, Number(process.env.BOOT_GRACE_MS || 15000));
 if (boot.autoWatcherEnabled && !boot.killSwitch) {
