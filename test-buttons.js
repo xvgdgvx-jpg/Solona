@@ -31,4 +31,6 @@ assert.match(source, /cfg:set:strategy:\(stopLoss\|takeProfit\)/);
 assert.match(source, /جني أرباح كامل \+.*fraction: 1/);
 assert.doesNotMatch(source, /fraction: 0\.5/);
 assert.doesNotMatch(source, /paperTakeProfitFinalPct/);
+assert.match(source, /const watcherRunning = Boolean\(st\.running && s\.autoWatcherEnabled && !s\.killSwitch\)/);
+assert.match(source, /const watcherLayer = watcherRunning \? '🟢' : '🔴'/);
 console.log(`button graph: ${exactRoutes.length} routes and reset lifecycle verified`);
