@@ -85,7 +85,7 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
   const decimals = Number(metadata.decimals ?? 6);
   const tokenAmount = outAmount / (10 ** decimals);
-  const existing = positions.find((p) => p.mint === mint && p.status === 'open');
+  const existing = positions.find((p) => p.mint === mint && p.status === 'open' && (p.mode || 'paper') === mode);
   if (existing) {
     existing.investedSol += investedSol;
     existing.tokenAmountRaw += outAmount;

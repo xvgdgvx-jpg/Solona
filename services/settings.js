@@ -25,6 +25,8 @@ function getSettings(adminId, key) {
   const settings = merge(defaults, user.settings);
   const today = new Date().toISOString().slice(0, 10);
   if (settings.tradeDay !== today) { settings.tradeDay = today; settings.tradesToday = 0; }
+  // Legacy versions used the auto-buy button to flip paperTradingEnabled, which could leave an unsafe ambiguous state.
+  if (settings.paperTradingEnabled === false && settings.liveTrading !== true) settings.paperTradingEnabled = true;
   const numericDefaults = { 'goplus.maxBuyTax': 10, 'goplus.maxSellTax': 10, 'tracker.maxRiskScore': 3, 'tracker.maxDeveloperHoldingPct': 15, 'tracker.maxSnipersPct': 15, 'tracker.maxInsidersPct': 15, 'tracker.maxBundlersPct': 30, 'tracker.maxTop10Pct': 25, 'tracker.minHolders': 100, 'tracker.maxDeveloperTokens': 0, 'risk.stopLossPct': 10, 'risk.timedSellMin': 0, 'risk.dailyLossPct': 0 }; for (const [path, fallback] of Object.entries(numericDefaults)) { const [section, field] = path.split('.'); if (typeof settings[section][field] === 'boolean' || !Number.isFinite(Number(settings[section][field]))) settings[section][field] = fallback; }
   return settings;
 }
