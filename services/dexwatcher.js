@@ -16,8 +16,8 @@ const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt
 const ALLOWED_DEXES_BY_MODE = { raydium: ['raydium'], raydium_orca: ['raydium', 'orca'], raydium_orca_meteora: ['raydium', 'orca', 'meteora_daam_v2', 'meteora_dbc'], all: null };
 
 class DexWatcher {
-  constructor({ settings, onCandidate, onError, onFilter }) {
-    this.settings = settings; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
+  constructor({ settings, getSettings, onCandidate, onError, onFilter }) {
+    this.settings = settings; this.getSettings = getSettings || null; this.onCandidate = onCandidate; this.onError = onError || (() => {}); this.onFilter = onFilter || (() => {});
     this.running = false; this.timer = null; this.watchdog = null; this.statusTimer = setInterval(() => console.log(`[dexwatcher-status] checked=${this.checkedCount} seen=${this.seen.size} polls=${this.pollCount} lastPoll=${this.lastPollAt} dur=${this.lastPollDurationMs}ms err=${this.lastError || 'none'}`), 60000); this.statusTimer.unref(); this.lastPollAt = null; this.lastError = null;
     this.lastCandidate = null; this.seen = new Set(); this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.pollInFlight = false; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.startedAt = new Date().toISOString(); this.source = 'DexPaprika'; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null; this.adminId = process.env.ADMIN_TELEGRAM_ID; this.encryptionKey = Buffer.from(process.env.ENCRYPTION_KEY || '', 'hex');
     this.lastRequestStatus = null; this.uniqueMintsLastPoll = 0; this.nextCursor = null; this.lastSeenAt = null; this.cursorPolls = 0;
@@ -49,6 +49,7 @@ class DexWatcher {
   }
   async poll() {
     if (!this.running || this.pollInFlight || Date.now() < this.nextAllowedPollAt) return;
+    if (this.getSettings) this.settings = this.getSettings();
     this.pollInFlight = true;
     this.lastPollStarted = Date.now();
     const startedAt = this.lastPollStarted;
