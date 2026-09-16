@@ -58,7 +58,8 @@ class DexWatcher {
     try {
       const now = Math.floor(Date.now() / 1000);
       const windowStart = this.lastSeenAt || (now - 3600);
-      const baseParams = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true, min_liquidity_usd: 500 };
+      const configuredMinLiquidity = Math.max(0, Number(this.settings.dex?.minLiquidityUsd ?? 0) || 0);
+      const baseParams = { order_by: 'created_at', sort: 'desc', limit: 100, detailed: true, min_liquidity_usd: configuredMinLiquidity };
       const params = this.nextCursor ? { ...baseParams, cursor: this.nextCursor } : { ...baseParams, created_after: windowStart };
       this.lastRequestStatus = null;
       const requestStart = Date.now();
@@ -122,7 +123,7 @@ class DexWatcher {
           const pool = queue.shift();
           if (!pool) break;
           const candidate = this.loadCandidate(pool);
-          if (!candidate || !candidate.createdAt || candidate.ageSec > 7200 || this.seen.has(candidate.mint)) continue;
+          if (!candidate || !candidate.createdAt || this.seen.has(candidate.mint)) continue;
           this.seen.add(candidate.mint);
           this.checkedCount += 1;
           this.checked = this.checkedCount;
@@ -169,9 +170,9 @@ class DexWatcher {
     if (oc.enabled === true) { const onChainResult = await this.checkOnChain(candidate.mint); if (onChainResult.data?.rpcError) { this.lastRpcError = onChainResult.data.rpcError; return fail('On-Chain: RPC error', 'onchain'); } if (!onChainResult.passed) return fail(onChainResult.reason, 'onchain'); candidate.onChainData = onChainResult.data; }
     const ageSec = candidate.createdAt ? Math.max(0, Date.now() / 1000 - candidate.createdAt) : 0;
     const gp = this.settings.goplus || {};
-    if (gp.enabled === true) { if (ageSec < 300) console.log(`[goplus] ${candidate.symbol}: skipped (age ${ageSec.toFixed(0)}s < 300s)`); else { const result = await this.goplus(candidate.mint); if (!result) return fail('GoPlus: لا توجد بيانات بعد 5 دقائق', 'goplus'); if (!this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); } }
+    if (gp.enabled === true) { const result = await this.goplus(candidate.mint); if (!result) return fail('GoPlus: لا توجد بيانات', 'goplus'); if (!this.passGoplus(result)) return fail('رفض GoPlus: فشل فحص الأمان', 'goplus'); }
     const tk = this.settings.tracker || {};
-    if (tk.enabled === true) { if (ageSec < 600) console.log(`[tracker] ${candidate.symbol}: skipped (age ${ageSec.toFixed(0)}s < 600s)`); else { const result = await this.tracker(candidate.mint); if (!result) return fail('Tracker: لا توجد بيانات بعد 10 دقائق', 'tracker'); if (!this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); } }
+    if (tk.enabled === true) { const result = await this.tracker(candidate.mint); if (!result) return fail('Tracker: لا توجد بيانات', 'tracker'); if (!this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     if (this.settings.tracker.enabled && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
     this.lastCandidate = candidate; this.passCount += 1; await this.onCandidate(candidate); return true;
   }
