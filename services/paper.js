@@ -85,7 +85,8 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error('لم يُرجع مصدر التسعير كمية صالحة.');
   const decimals = Number(metadata.decimals ?? 6);
   const tokenAmount = outAmount / (10 ** decimals);
-  const existing = positions.find((p) => p.mint === mint && p.status === 'open' && (p.mode || 'paper') === mode);
+  const pairAddress = String(metadata.poolAddress || metadata.pairAddress || '').trim() || null;
+  const existing = positions.find((p) => p.mint === mint && p.status === 'open' && (p.mode || 'paper') === mode && String(p.pairAddress || p.entryMetadata?.poolAddress || '') === String(pairAddress || ''));
   if (existing) {
     existing.investedSol += investedSol;
     existing.tokenAmountRaw += outAmount;
@@ -93,12 +94,17 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
     existing.entryPriceSol = existing.investedSol / existing.tokenAmount;
     existing.updatedAt = Date.now();
     existing.mode = existing.mode || mode;
-    if (buySignature) existing.buySignature = buySignature;
+    if (buySignature) { existing.buySignature = buySignature; existing.buySignatures = [...(existing.buySignatures || []), buySignature]; }
+    existing.pairAddress = existing.pairAddress || pairAddress;
     existing.entryMetadata = { ...(existing.entryMetadata || {}), ...metadata };
+    existing.entryLiquidityUsd = Number(existing.entryLiquidityUsd || metadata.liquidityUsd || 0);
+    existing.entryVolumeUsd = Number(existing.entryVolumeUsd || metadata.volumeUsd || 0);
+    existing.entryMarketCapUsd = Number(existing.entryMarketCapUsd || metadata.marketCapUsd || 0);
   } else {
     positions.push({
-      id: `${mint}:${Date.now()}`,
+      id: `${mint}:${pairAddress || 'unknown'}:${Date.now()}`,
       mint,
+      pairAddress,
       name: metadata.name || 'بدون اسم',
       symbol: metadata.symbol || 'N/A',
       mode,
@@ -121,6 +127,9 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
       entryMetadata: { ...metadata },
       liquiditySol: Number(metadata.liquiditySol || 0),
       marketCapUsd: Number(metadata.marketCapUsd || 0),
+      entryLiquidityUsd: Number(metadata.liquidityUsd || 0),
+      entryVolumeUsd: Number(metadata.volumeUsd || 0),
+      entryMarketCapUsd: Number(metadata.marketCapUsd || 0),
     });
   }
   savePositionsUnlocked(adminId, positions, key);
@@ -256,7 +265,9 @@ async function mergeDuplicateOpenPositions(adminId, key) {
     let changed = false;
     for (const position of positions) {
       if (position.status !== 'open') { merged.push(position); continue; }
-      const groupKey = `${position.mode || 'paper'}:${position.mint}`;
+      const pairAddress = String(position.pairAddress || position.entryMetadata?.poolAddress || '').trim() || 'legacy';
+      const groupKey = `${position.mode || 'paper'}:${position.mint}:${pairAddress}`;
+      position.pairAddress = position.pairAddress || (pairAddress === 'legacy' ? null : pairAddress);
       const existing = byKey.get(groupKey);
       if (!existing) { byKey.set(groupKey, position); merged.push(position); continue; }
       const decimals = Number(existing.decimals ?? position.decimals ?? 6);
