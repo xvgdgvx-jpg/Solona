@@ -1,6 +1,6 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const config = require('../config');
-const { getQuote, SOL_MINT, keypairFromSecret, getSolBalance } = require('../services/solana');
+const { getQuote, SOL_MINT, keypairFromSecret, getSolBalance, executeSwap } = require('../services/solana');
 const { getSettings, saveSettings } = require('../services/settings');
 const { DexWatcher } = require('../services/dexwatcher');
 const { openPosition, getPositions, replacePositions, closePosition, refreshPositionsCached, refreshPositions, mergeDuplicateOpenPositions } = require('../services/paper');
