@@ -14,6 +14,9 @@ assert.match(source, /if \(s\.autoSellEnabled && !s\.killSwitch\) startMonitor\(
 assert.match(source, /if \(!result \|\| persisted\?\.status !== 'closed'\)/);
 assert.match(source, /try \{ const address = await walletAddress\(\)/);
 assert.match(source, /const watcherRunning = Boolean\(st\.running && s\.autoWatcherEnabled && !s\.killSwitch\)/);
+assert.match(source, /swap\.simulated === true/);
+assert.match(source, /mode: live \? 'live' : 'paper'/);
+assert.match(source, /e\.type === 'بيع' && \(e\.mode \|\| 'paper'\) === activeMode/);
 assert.match(source, /pairAddress/);
 assert.match(source, /💵 سعر الشراء/);
 assert.match(source, /💧 LIQ عند الشراء/);
