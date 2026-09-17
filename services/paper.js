@@ -92,6 +92,7 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
     existing.tokenAmountRaw += outAmount;
     existing.tokenAmount = existing.tokenAmountRaw / (10 ** existing.decimals);
     existing.entryPriceSol = existing.investedSol / existing.tokenAmount;
+    if (metadata.priceUsd) existing.entryPriceUsd = Number(metadata.priceUsd);
     existing.updatedAt = Date.now();
     existing.mode = existing.mode || mode;
     if (buySignature) { existing.buySignature = buySignature; existing.buySignatures = [...(existing.buySignatures || []), buySignature]; }
@@ -113,6 +114,7 @@ async function openPosition({ adminId, key, jupiterUrl, mint, investedSol, quote
       tokenAmount,
       decimals,
       entryPriceSol: investedSol / tokenAmount,
+      entryPriceUsd: Number(metadata.priceUsd || 0) || null,
       entryQuote: quote,
       buySignature,
       sellSignatures: [],

@@ -164,7 +164,12 @@ class DexWatcher {
       const txns = pool.txns_24h ?? pool.transactions_24h; const buys = Number(txns?.buys ?? txns?.buy ?? txns?.buy_count ?? txns ?? 0); const sells = Number(txns?.sells ?? txns?.sell ?? txns?.sell_count ?? 0);
       const created = typeof pool.created_at === 'number' ? pool.created_at : (pool.created_at ? Date.parse(pool.created_at) / 1000 : null);
       const ageSec = Number.isFinite(created) ? Math.max(0, Date.now() / 1000 - created) : null;
-      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd: Number(pool.fdv_usd || 0) || null, liquidityUsd: Number(pool.liquidity_usd || 0) || 0, volumeUsd: Number(pool.volume_usd_24h || 0) || 0, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, creator: pool.creator || pool.created_by || token.creator || token.created_by || null, dexName: pool.dex_name || pool.dex_id, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
+      const period24 = pool['24h'] || pool['24H'] || pool.volume_24h || {};
+      const marketCapUsd = Number(token.fdv ?? token.fdv_usd ?? pool.fdv_usd ?? pool.market_cap_usd ?? 0) || null;
+      const liquidityUsd = Number(pool.liquidity_usd ?? pool.liquidityUsd ?? 0) || 0;
+      const volumeUsd = Number(pool.volume_usd_24h ?? pool.volume_usd ?? period24.volume_usd ?? period24.volume ?? 0) || 0;
+      const priceUsd = Number(pool.price_usd ?? pool.last_price_usd ?? token.price_usd ?? 0) || null;
+      return { mint, name: token.name || token.symbol || 'بدون اسم', symbol: token.symbol || 'N/A', decimals: Number(token.decimals || 6), createdAt: Number.isFinite(created) ? created : null, ageSec, marketCapUsd, priceUsd, liquidityUsd, volumeUsd, dexBuys: buys, dexSells: sells, buySellRatio: buys / Math.max(1, sells), mintAuthority: null, freezeAuthority: null, poolAddress: pool.id, creator: pool.creator || pool.created_by || token.creator || token.created_by || null, dexName: pool.dex_name || pool.dex_id, marketDataSource: 'dexpaprika', source: 'dexpaprika' };
     } catch (_) { return null; }
   }
   async evaluate(candidate) {
