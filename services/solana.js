@@ -26,6 +26,12 @@ let lastQuoteAt = 0;
 let jupiterBackoffUntil = 0;
 let quoteQueue = Promise.resolve();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const RPC_TIMEOUT_MS = Math.max(3000, Number(process.env.RPC_TIMEOUT_MS || 12000));
+function withTimeout(promise, label, timeoutMs = RPC_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} انتهت مهلته بعد ${timeoutMs}ms`)), timeoutMs); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function enqueueQuote(task) {
   const next = quoteQueue.then(task, task);
@@ -95,7 +101,7 @@ async function getQuote({ jupiterUrl, inputMint = SOL_MINT, outputMint, amountLa
 async function getTokenAmount({ rpcUrl, ownerSecret, mint, uiAmount }) {
   const wallet = keypairFromSecret(ownerSecret);
   try {
-    const accounts = await connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) });
+    const accounts = await withTimeout(connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) }), 'قراءة حسابات العملة');
     const account = accounts.value.find(({ account }) => Number(account.data.parsed.info.tokenAmount.uiAmount || 0) >= uiAmount);
     if (!account) throw new Error('الرصيد غير كافٍ لهذه العملة.');
     const info = account.account.data.parsed.info.tokenAmount;
@@ -109,7 +115,7 @@ async function getTokenAmount({ rpcUrl, ownerSecret, mint, uiAmount }) {
 async function getTokenBalance({ rpcUrl, ownerSecret, mint, fraction = 1 }) {
   const wallet = keypairFromSecret(ownerSecret);
   try {
-    const accounts = await connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) });
+    const accounts = await withTimeout(connection(rpcUrl).getParsedTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) }), 'قراءة رصيد العملة');
     const account = accounts.value.find(({ account }) => Number(account.data.parsed.info.tokenAmount.uiAmount || 0) > 0);
     if (!account) throw new Error('لا يوجد رصيد لهذه العملة.');
     const info = account.account.data.parsed.info.tokenAmount;
@@ -128,9 +134,9 @@ async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, pri
     const transaction = VersionedTransaction.deserialize(Buffer.from(data.swapTransaction, 'base64'));
     transaction.sign([wallet]);
     const conn = connection(rpcUrl);
-    const signature = await conn.sendRawTransaction(transaction.serialize(), { maxRetries: 3, skipPreflight: false });
-    await conn.confirmTransaction(signature, 'confirmed');
-    const confirmed = await conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 });
+    const signature = await withTimeout(conn.sendRawTransaction(transaction.serialize(), { maxRetries: 3, skipPreflight: false }), 'إرسال المعاملة');
+    await withTimeout(conn.confirmTransaction(signature, 'confirmed'), 'تأكيد المعاملة', 20000);
+    const confirmed = await withTimeout(conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 }), 'قراءة المعاملة');
     const feeLamports = Number(confirmed?.meta?.fee || 0);
     return { simulated: false, signature, wallet: wallet.publicKey.toBase58(), feeLamports, feeSol: feeLamports / 1e9 };
   } catch (error) {
@@ -140,12 +146,12 @@ async function executeSwap({ rpcUrl, jupiterUrl, secret, quote, liveTrading, pri
 
 async function getSolBalance({ rpcUrl, owner }) {
   const publicKey = owner instanceof PublicKey ? owner : new PublicKey(owner);
-  return (await withRpcFallback(rpcUrl, (conn) => conn.getBalance(publicKey, 'confirmed'))) / 1e9;
+  return (await withRpcFallback(rpcUrl, (conn) => withTimeout(conn.getBalance(publicKey, 'confirmed'), 'قراءة رصيد SOL'))) / 1e9;
 }
 
 async function checkSolReceived({ rpcUrl, signature, beforeSol, owner }) {
   const conn = connection(rpcUrl);
-  const tx = await conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 });
+  const tx = await withTimeout(conn.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 1 }), 'قراءة معاملة البيع', 20000);
   if (!tx) throw new Error('لم يتم تأكيد المعاملة.');
   if (tx.meta?.err) throw new Error(`فشلت المعاملة على السلسلة: ${JSON.stringify(tx.meta.err)}`);
   const afterSol = await getSolBalance({ rpcUrl, owner });
@@ -161,11 +167,11 @@ async function sendSol({ rpcUrl, secret, destination, amountSol, liveTrading, pr
   if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('مبلغ السحب يجب أن يكون أكبر من صفر.');
   if (!liveTrading) return { simulated: true, wallet: wallet.publicKey.toBase58(), destination: recipient.toBase58(), amountSol: lamports / 1e9 };
   const conn = connection(rpcUrl);
-  const balance = await conn.getBalance(wallet.publicKey, 'confirmed');
+  const balance = await withTimeout(conn.getBalance(wallet.publicKey, 'confirmed'), 'قراءة رصيد السحب');
   if (lamports >= balance) throw new Error('المبلغ يتجاوز الرصيد المتاح بعد احتساب رسوم الشبكة.');
   const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: recipient, lamports }));
-  const signature = await conn.sendTransaction(tx, [wallet], { maxRetries: 3, skipPreflight: false });
-  await conn.confirmTransaction(signature, 'confirmed');
+  const signature = await withTimeout(conn.sendTransaction(tx, [wallet], { maxRetries: 3, skipPreflight: false }), 'إرسال السحب');
+  await withTimeout(conn.confirmTransaction(signature, 'confirmed'), 'تأكيد السحب', 20000);
   return { simulated: false, signature, wallet: wallet.publicKey.toBase58(), destination: recipient.toBase58(), amountSol: lamports / 1e9 };
 }
 
@@ -174,7 +180,7 @@ async function getPortfolio({ rpcUrl, secret }) {
   try {
     return await withRpcFallback(rpcUrl, async (conn) => {
       const balance = await conn.getBalance(wallet.publicKey);
-      const tokens = await conn.getParsedTokenAccountsByOwner(wallet.publicKey, { programId: TOKEN_PROGRAM_ID });
+      const tokens = await withTimeout(conn.getParsedTokenAccountsByOwner(wallet.publicKey, { programId: TOKEN_PROGRAM_ID }), 'قراءة رموز المحفظة');
       return { address: wallet.publicKey.toBase58(), sol: balance / 1e9, tokens: tokens.value.map(({ account }) => account.data.parsed.info.tokenAmount).filter((x) => Number(x.uiAmount) > 0) };
     });
   } catch (error) {

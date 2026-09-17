@@ -11,7 +11,7 @@ const required = [
 for (const route of required) assert.match(source, new RegExp(route.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')), `missing button route: ${route}`);
 assert.match(source, /await save\(s\); watcher\.updateSettings\(s\); if \(field === 'autoWatcherEnabled'\)/);
 assert.match(source, /if \(s\.autoSellEnabled && !s\.killSwitch\) startMonitor\(\)/);
-assert.match(source, /if \(!result\) return show\(ctx, '⚠️ تعذر تأكيد إغلاق المركز/);
+assert.match(source, /if \(!result \|\| persisted\?\.status !== 'closed'\)/);
 assert.match(source, /try \{ const address = await walletAddress\(\)/);
 assert.match(source, /const watcherRunning = Boolean\(st\.running && s\.autoWatcherEnabled && !s\.killSwitch\)/);
 console.log(`button coverage: ${required.length} required routes and behavioral guards passed`);
