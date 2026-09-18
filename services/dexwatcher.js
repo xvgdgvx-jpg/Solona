@@ -45,13 +45,20 @@ class DexWatcher {
   }
   stop() { this.running = false; if (this.timer) clearInterval(this.timer); if (this.watchdog) clearInterval(this.watchdog); if (this.statusTimer) clearInterval(this.statusTimer); this.timer = this.watchdog = this.statusTimer = null; }
   reset() { this.seen.clear(); this.lastError = null; this.lastCandidate = null; this.checked = 0; this.checkedCount = 0; this.pollCount = 0; this.lastPollAt = null; this.lastPollDurationMs = null; this.lastRequestDurationMs = null; this.lastPollStarted = null; this.nextAllowedPollAt = 0; this.rejectStats = {}; this.passCount = 0; this.rejectCount = 0; this.rejectByStage = { dex: 0, onchain: 0, goplus: 0, tracker: 0 }; this.onChainCache = new Map(); this.lastRpcError = null; this.nextCursor = null; this.lastSeenAt = null; this.cursorPolls = 0; this.uniqueMintsLastPoll = 0; }
-  status() { return { running: this.running, source: this.source, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, lastRpcError: this.lastRpcError, uniqueMintsLastPoll: this.uniqueMintsLastPoll || 0, lastSeenAt: this.lastSeenAt, nextCursor: this.nextCursor ? 'set' : null, cursorPolls: this.cursorPolls || 0, onChainCacheSize: this.onChainCache.size, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
+  status() { const dex = this.settings?.dex || {}; return { running: this.running, source: this.source, hasDexPaprikaKey: Boolean(process.env.DEXPAPRIKA_API_KEY), dexSettings: { minAgeSec: dex.minAgeSec, maxAgeSec: dex.maxAgeSec, minVolumeUsd: dex.minVolumeUsd, minLiquidityUsd: dex.minLiquidityUsd, minBuys24h: dex.minBuys24h, minBuySellRatio: dex.minBuySellRatio, minMarketCapUsd: dex.minMarketCapUsd, maxMarketCapUsd: dex.maxMarketCapUsd, allowedDexes: dex.allowedDexes, antiDuplicate: dex.antiDuplicate }, checked: this.checkedCount, seen: this.seen.size, lastPollAt: this.lastPollAt, lastPollDurationMs: this.lastPollDurationMs, lastRequestDurationMs: this.lastRequestDurationMs, lastError: this.lastError, lastMint: this.lastCandidate?.mint || null, lastSymbol: this.lastCandidate?.symbol || null, rejectStats: this.rejectStats, passCount: this.passCount, rejectCount: this.rejectCount, rejectByStage: this.rejectByStage, lastRpcError: this.lastRpcError, uniqueMintsLastPoll: this.uniqueMintsLastPoll || 0, lastSeenAt: this.lastSeenAt, nextCursor: this.nextCursor ? 'set' : null, cursorPolls: this.cursorPolls || 0, onChainCacheSize: this.onChainCache.size, pollCount: this.pollCount, startedAt: this.startedAt, uptime: process.uptime() }; }
   async request(url, options = {}) {
-    const attempts = Number(options.retries ?? 2); const requestOptions = { timeout: 10000, headers: { 'User-Agent': 'Solana-DexPaprika-Watcher/1.0', 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) }, ...options }; delete requestOptions.retries;
+    const attempts = Number(options.retries ?? 2);
+    const apiKey = process.env.DEXPAPRIKA_API_KEY;
+    const headers = { 'User-Agent': 'Solana-DexPaprika-Watcher/1.0', 'Cache-Control': 'no-cache', Pragma: 'no-cache', ...(options.headers || {}) };
+    if (apiKey && String(url).includes('dexpaprika.com')) headers.Authorization = apiKey;
+    const requestOptions = { ...options, timeout: 10000, headers };
+    delete requestOptions.retries;
     for (let attempt = 0; attempt <= attempts; attempt += 1) {
       try { this.lastRequestStatus = null; return (await axios.get(url, requestOptions)).data; }
       catch (error) {
         const status = error.response?.status; this.lastRequestStatus = status || null;
+        if (status === 402) { this.lastError = 'DexPaprika 402 — الرصيد المجاني انتهى. تحقق من المفتاح أو أضف مفتاحاً'; this.onError(new Error('DEXPAPRIKA_402')); return null; }
+        if (status === 401 || status === 403) { this.lastError = `DexPaprika ${status} — المفتاح غير صالح`; this.onError(new Error(`DEXPAPRIKA_${status}`)); return null; }
         if (status === 429 && attempt < attempts) { await sleep(Math.min(15000, Math.max(1000, (attempt + 1) * 2000))); continue; }
         this.lastError = error.message; if (Date.now() - this.lastRateLimitNoticeAt > 60000) { this.lastRateLimitNoticeAt = Date.now(); this.onError(error); } return null;
       }
@@ -185,6 +192,7 @@ class DexWatcher {
     const minBuySellRatio = threshold(dex.minBuySellRatio);
     const minMarketCapUsd = threshold(dex.minMarketCapUsd);
     const maxMarketCapUsd = threshold(dex.maxMarketCapUsd);
+    console.log(`[eval] ${candidate.symbol || candidate.name || 'N/A'} | age=${age == null ? 'n/a' : age.toFixed(0)}s liq=$${candidate.liquidityUsd ?? 0} vol=$${candidate.volumeUsd ?? 0} dex=${candidate.dexName || 'unknown'}`);
     const fail = (reason, stage) => { const key = `${stage}: ${reason}`; this.rejectStats[key] = (this.rejectStats[key] || 0) + 1; this.rejectCount += 1; this.rejectByStage[stage] = (this.rejectByStage[stage] || 0) + 1; this.onFilter(candidate, reason, stage); return false; };
     if (!candidate.mint || (() => { try { new PublicKey(candidate.mint); return false; } catch (_) { return true; } })()) return fail('عنوان العملة غير صالح', 'dex');
     if (age != null && (age < minAgeSec || (maxAgeSec > 0 && age > maxAgeSec))) return fail('العمر خارج الحدود', 'dex');
@@ -201,7 +209,7 @@ class DexWatcher {
     const tk = currentSettings.tracker || {};
     if (tk.enabled === true) { const result = await this.tracker(candidate.mint); if (!result) return fail('Tracker: لا توجد بيانات', 'tracker'); if (!this.passTracker(result)) return fail('رفض Solana Tracker: تجاوز حدود المخاطر', 'tracker'); }
     if (tk.enabled === true && candidate.creator) { const rep = await this.checkDeployerReputation(candidate.mint, candidate.creator); if (!rep.passed) return fail(`منشئ مشبوه: ${rep.reason}`, 'tracker'); }
-    this.lastCandidate = candidate; this.passCount += 1; await this.onCandidate(candidate); return true;
+    this.lastCandidate = candidate; this.passCount += 1; console.log(`[eval] ${candidate.symbol || candidate.name || 'N/A'} ✅ passed all filters`); await this.onCandidate(candidate); return true;
   }
   async checkOnChain(mint) {
     const cached = this.onChainCache.get(mint);
