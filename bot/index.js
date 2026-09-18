@@ -106,6 +106,26 @@ bot.callbackQuery('cfg:allocation', async (ctx) => { await safeAnswer(ctx); cons
 bot.callbackQuery('cfg:trades', async (ctx) => { await safeAnswer(ctx); const k = new InlineKeyboard(); for (const v of [1,2,3,4,5,10]) k.text(String(v), `cfg:set:trades:${v}`); k.text('غير محدود', 'cfg:set:trades:0').row(); k.text('🔙 رجوع', 'settings'); await show(ctx, '🔢 عدد الصفقات اليومي', k); });
 bot.callbackQuery('cfg:profit', async (ctx) => { await safeAnswer(ctx); const k = new InlineKeyboard(); for (const v of [5,10,15,25,35,50,75,100]) k.text(`${v}%`, `cfg:set:profit:${v}`).row(); await show(ctx, '🎯 جني الأرباح', k); });
 bot.callbackQuery('cfg:stop', async (ctx) => { await safeAnswer(ctx); const k = new InlineKeyboard(); for (const v of [5,10,15,20,25,30]) k.text(`-${v}%`, `cfg:set:stop:${v}`); await show(ctx, '🛑 وقف الخسارة', k); });
+bot.callbackQuery(/^cfg:set:(allocation|trades|profit|stop):(\d+)$/, async (ctx) => {
+  await safeAnswer(ctx, 'تم الحفظ');
+  const type = ctx.match[1];
+  const value = Number(ctx.match[2]);
+  const allowed = {
+    allocation: [1,2,3,4,5,10,15,25,30,35,40,50,60,75,90,100],
+    trades: [0,1,2,3,4,5,10],
+    profit: [5,10,15,25,35,50,75,100],
+    stop: [5,10,15,20,25,30]
+  }[type];
+  if (!allowed.includes(value)) return show(ctx, '❌ قيمة غير صالحة.', settingsKeyboard(settings()));
+  const s = settings();
+  if (type === 'allocation') s.paperAllocationPct = value;
+  if (type === 'trades') s.maxTradesPerDay = value;
+  if (type === 'profit') s.paperTakeProfitFirstPct = value;
+  if (type === 'stop') { s.paperStopLossPct = value; s.risk.stopLossPct = value; }
+  await save(s);
+  watcher.updateSettings(s);
+  await show(ctx, `✅ تم حفظ ${type === 'allocation' ? 'حجم الصفقة' : type === 'trades' ? 'عدد الصفقات' : type === 'profit' ? 'جني الأرباح' : 'وقف الخسارة'}: ${value}${type === 'allocation' || type === 'profit' || type === 'stop' ? '%' : ''}`, settingsKeyboard(s));
+});
 for (const [id, field] of [['cfg:buy','autoWatcherEnabled'],['cfg:sell','autoSellEnabled']]) bot.callbackQuery(id, async (ctx) => { await safeAnswer(ctx, 'تم التحديث'); const s = settings(); s[field] = !s[field]; if (field === 'autoWatcherEnabled' && s[field]) s.killSwitch = false; await save(s); watcher.updateSettings(s); if (field === 'autoWatcherEnabled') { if (s[field]) { watcher.start(); if (s.autoSellEnabled && !s.killSwitch) startMonitor(); } else { watcher.stop(); stopMonitor(); } } if (field === 'autoSellEnabled') { if (s[field] && s.autoWatcherEnabled && !s.killSwitch) startMonitor(); else stopMonitor(); } await show(ctx, '⚙️ الإعدادات', settingsKeyboard(s)); });
 bot.callbackQuery('roadmap', async (ctx) => { await safeAnswer(ctx); await show(ctx, roadmapText(settings()), new InlineKeyboard().text('🔙 رجوع', 'home')); });
 bot.callbackQuery('reset:ask', async (ctx) => { await safeAnswer(ctx); if (!isAdmin(ctx)) return; const s = settings(); const message = s.paperTradingEnabled ? '⚠️ سيتم حذف مراكز Paper وإحصائيات الفحص وسجل العمليات. هل أنت متأكد؟' : '⚠️ سيتم تنظيف إحصائيات اللوحة فقط. مراكز Live والعملات الموجودة في المحفظة لن تتغير. هل أنت متأكد؟'; await show(ctx, message, new InlineKeyboard().text('✅ تأكيد', 'reset:do').row().text('🔙 إلغاء', 'home')); });

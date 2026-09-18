@@ -1,0 +1,173 @@
+SOLONA BOT — PROJECT FILES, COMMANDS, AND TELEGRAM ROUTES
+============================================================
+
+1) تشغيل وفحص المشروع
+----------------------
+npm install
+npm run check
+npm start
+
+أمر التشغيل الموحد في Render:
+node index.js
+
+أمر الفحص الكامل:
+node --check index.js && node --check config.js && find bot services utils -name '*.js' -print0 | xargs -0 -n1 node --check && node test-buttons.js && node test-button-coverage.js && node test-settings.js && node test-settings-routes.js && node test-dexwatcher.js
+
+2) ملفات المشروع
+----------------
+.env.example
+قالب متغيرات البيئة. لا يحتوي أسرارًا. يتضمن Telegram، RPC، Jupiter، مفاتيح الفلاتر، LIVE_TRADING، وPORT.
+
+README.md
+تعريف مختصر وتشغيل وفحص وتحذير التداول الحقيقي.
+
+PROJECT_COMMANDS.txt
+هذا الملف: جرد الملفات والأوامر ومسارات Telegram.
+
+package.json
+اسم المشروع، نسخة Node المطلوبة، التبعيات، وأوامر start/check.
+
+package-lock.json
+تثبيت نسخ تبعيات Node.
+
+index.js
+نقطة تشغيل واحدة للبوت. ينشئ قفلًا لمنع تشغيل نسختين، يبدأ خادم الصحة، يبدأ Telegram polling، ويتعامل مع التعارض والإغلاق.
+
+config.js
+تحميل البيئة، التحقق من الأسرار، اشتقاق محفظة Solana، إعداد RPC وJupiter ورسوم الأولوية.
+
+health-server.js
+مسارات الصحة والـ ping لخدمة Render والمراقبة الخارجية.
+
+bot/index.js
+واجهة Telegram، إعدادات الأزرار، تشغيل المراقب، تنفيذ الشراء، ومراقبة البيع التلقائي.
+
+services/settings.js
+القيم الافتراضية، دمج الإعدادات، تنظيف الحقول القديمة، حفظ الإعدادات، وحد الصفقات اليومية.
+
+services/dexwatcher.js
+جلب مجمعات DexPaprika، تجميع أفضل Pool لكل Mint، فلاتر DEX وOn-Chain وGoPlus وTracker، ومنع تكرار Mint داخل الوضع الحالي.
+
+services/solana.js
+Quotes وSwap وبيع وقراءة الرصيد والمحفظة ومعاملات Solana.
+
+services/paper.js
+فتح وإغلاق وتحديث مراكز Paper وLive، منع التزامن الخاطئ، ودمج المراكز المكررة.
+
+services/storage.js
+تخزين المستخدمين والإعدادات والمراكز في data/users.enc بصورة مشفرة.
+
+utils/crypto.js
+تشفير وفك تشفير AES للمخزن المحلي.
+
+test-buttons.js
+فحص وجود المسارات الرئيسية وحواجز دورة الإعدادات وإغلاق المراكز.
+
+test-button-coverage.js
+فحص تغطية الأزرار وحواجز Live/Paper ومسارات المحفظة والبيع.
+
+test-settings.js
+فحص حذف الحقول القديمة وحد الصفقات اليومية.
+
+test-settings-routes.js
+فحص كل قيم أزرار حجم الصفقة، عدد الصفقات، جني الأرباح، ووقف الخسارة.
+
+test-dexwatcher.js
+7 سيناريوهات لفلاتر DEX وOn-Chain وGoPlus وTracker.
+
+3) مسارات Telegram الرئيسية
+---------------------------
+watch:on
+تشغيل المراقب وتفعيل autoWatcherEnabled وإلغاء killSwitch وبدء البيع التلقائي إن كان مفعّلًا.
+
+watch:off
+إيقاف المراقب وإيقاف مراقبة البيع التلقائي.
+
+settings
+فتح شاشة الإعدادات.
+
+cfg:allocation ثم cfg:set:allocation:<value>
+تغيير نسبة حجم الصفقة. القيم: 1,2,3,4,5,10,15,25,30,35,40,50,60,75,90,100.
+الحقل المحفوظ: paperAllocationPct.
+
+cfg:trades ثم cfg:set:trades:<value>
+تغيير حد الصفقات اليومية. القيم: 1,2,3,4,5,10 و0 = غير محدود.
+الحقل المحفوظ: maxTradesPerDay.
+
+cfg:profit ثم cfg:set:profit:<value>
+تغيير جني الأرباح. القيم: 5,10,15,25,35,50,75,100.
+الحقل المحفوظ: paperTakeProfitFirstPct.
+
+cfg:stop ثم cfg:set:stop:<value>
+تغيير وقف الخسارة. القيم: 5,10,15,20,25,30.
+الحقول المحفوظة: paperStopLossPct وrisk.stopLossPct.
+
+cfg:buy
+تبديل الشراء التلقائي.
+
+cfg:sell
+تبديل البيع التلقائي.
+
+filters
+فتح فلاتر الحماية.
+filters:dex
+إعدادات DexPaprika وDEX المسموح ومنع التكرار.
+filters:onchain
+فحوص Mint/Freeze/Top10/Supply/Decimals/Update Authority.
+filters:goplus
+فلاتر GoPlus.
+filters:tracker
+فلاتر Solana Tracker.
+filters:risk
+وقف الخسارة وحماية رأس المال والبيع الزمني وقاطع الطوارئ.
+
+toggle-filter:onchain / toggle-filter:goplus / toggle-filter:tracker
+تبديل الفلاتر الاختيارية.
+
+choose:<section>:<key> ثم set:<section>:<key>:<value>
+فتح قيمة الفلتر ثم حفظها بعد التحقق من أن القيمة موجودة ضمن القائمة المسموحة.
+
+mode:toggle
+فتح تأكيد تبديل Paper/Live.
+mode:live
+تفعيل التداول الحقيقي فقط بعد تأكيد المستخدم.
+mode:paper
+تفعيل التداول الوهمي.
+
+wallet / wallet:balance
+عرض المحفظة ورصيد SOL.
+
+dashboard
+عرض حالة المراقب، المرشحين، الفلاتر، والصفقات.
+
+unsold
+عرض المراكز المفتوحة.
+position:price:<id>
+عرض السعر الحالي لمركز.
+position:sell:<id>
+بيع مركز يدويًا مع التحقق من الإغلاق.
+
+reset:ask ثم reset:do
+إعادة ضبط الإحصاءات. في Paper تحذف مراكز Paper فقط، وتحافظ على مراكز Live.
+
+roadmap
+عرض خارطة الطريق.
+home
+العودة للواجهة الرئيسية.
+
+4) حماية مهمة
+-------------
+كل مسارات الأزرار تستخدم isAdmin قبل تنفيذ العمليات الحساسة.
+لا يوجد مسار cfg:strategy ولا الحقل autoSellStrategy.
+وقف الخسارة وجني الأرباح يعملان معًا.
+التداول الحقيقي لا يسجل المركز إلا بعد وجود توقيع معاملة حقيقي.
+قفل data/bot.lock يمنع تشغيل نسختين محليًا.
+
+5) نتيجة الاختبار الأخيرة
+-------------------------
+- 29 مسار زر رئيسي.
+- 28 فحص تغطية سلوكية.
+- اختبار تنظيف الإعدادات وحد الصفقات.
+- اختبار كل قيم الإعدادات الأربعة.
+- 7 سيناريوهات DexWatcher.
+- فحص syntax لجميع ملفات JavaScript.
