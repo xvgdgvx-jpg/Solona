@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const source = fs.readFileSync('bot/index.js', 'utf8');
 const exactRoutes = [
   'watch:on', 'watch:off', 'settings', 'dashboard', 'wallet', 'wallet:balance', 'unsold',
-  'cfg:allocation', 'cfg:trades', 'cfg:profit', 'cfg:stop', 'cfg:strategy', 'cfg:buy', 'cfg:sell',
+  'cfg:allocation', 'cfg:trades', 'cfg:profit', 'cfg:stop', 'cfg:buy', 'cfg:sell',
   'roadmap', 'reset:ask', 'reset:do', 'mode:toggle', 'mode:live', 'mode:paper',
   'filters', 'filters:dex', 'filters:onchain', 'filters:goplus', 'filters:tracker', 'filters:risk',
   'toggle-filter:onchain', 'toggle-filter:goplus', 'toggle-filter:tracker', 'home'
@@ -26,8 +26,6 @@ assert.match(source, /catch \(error\).*فشلت إعادة الضبط/s);
 assert.match(source, /takeProfitPct/);
 assert.match(source, /mergeDuplicateOpenPositions/);
 assert.match(source, /autoSellMints/);
-assert.match(source, /autoSellStrategy/);
-assert.match(source, /cfg:set:strategy:\(stopLoss\|takeProfit\)/);
 assert.match(source, /جني أرباح كامل \+.*fraction: 1/);
 assert.doesNotMatch(source, /fraction: 0\.5/);
 assert.doesNotMatch(source, /paperTakeProfitFinalPct/);

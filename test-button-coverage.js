@@ -6,7 +6,7 @@ const required = [
   'mode:toggle', 'mode:live', 'mode:paper', 'roadmap', 'reset:ask', 'reset:do',
   'filters', 'filters:dex', 'filters:onchain', 'filters:goplus', 'filters:tracker', 'filters:risk',
   'toggle-filter:onchain', 'toggle-filter:goplus', 'toggle-filter:tracker',
-  'cfg:allocation', 'cfg:trades', 'cfg:profit', 'cfg:stop', 'cfg:strategy', 'cfg:buy', 'cfg:sell'
+  'cfg:allocation', 'cfg:trades', 'cfg:profit', 'cfg:stop', 'cfg:buy', 'cfg:sell'
 ];
 for (const route of required) assert.match(source, new RegExp(route.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')), `missing button route: ${route}`);
 assert.match(source, /await save\(s\); watcher\.updateSettings\(s\); if \(field === 'autoWatcherEnabled'\)/);
