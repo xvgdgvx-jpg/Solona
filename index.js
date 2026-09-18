@@ -77,7 +77,7 @@ if (Math.abs(Number(startupSettings.paperAvailableSol) - expectedAvailable) > 0.
 }
 let retryDelayMs = 5000;
 let retryTimer = null;
-const conflictMessage = '[telegram] ⚠️ Conflict — نسخة أخرى تعمل بنفس التوكن. تحقق من: 1) Render services, 2) keep-alive.js, 3) تشغيل محلي';
+const conflictMessage = '[telegram] ⚠️ Conflict — نسخة أخرى تعمل بنفس التوكن. تحقق من خدمات Render أو أي تشغيل محلي';
 const isConflict = (error) => error?.error_code === 409 || error?.description?.includes('Conflict') || error?.message?.includes('Conflict');
 const startBot = async () => {
   if (shuttingDown || botStarting || botReady) return;

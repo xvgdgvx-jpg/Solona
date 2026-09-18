@@ -29,6 +29,7 @@ assert.match(source, /autoSellMints/);
 assert.match(source, /جني أرباح كامل \+.*fraction: 1/);
 assert.doesNotMatch(source, /fraction: 0\.5/);
 assert.doesNotMatch(source, /paperTakeProfitFinalPct/);
+assert.doesNotMatch(source, /cfg:strategy|autoSellStrategy/);
 assert.match(source, /const watcherRunning = Boolean\(st\.running && s\.autoWatcherEnabled && !s\.killSwitch\)/);
 assert.match(source, /const watcherLayer = watcherRunning \? '🟢' : '🔴'/);
 assert.match(source, /if \(field === 'autoWatcherEnabled' && s\[field\]\) s\.killSwitch = false; await save\(s\); watcher\.updateSettings\(s\)/);

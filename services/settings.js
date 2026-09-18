@@ -1,10 +1,10 @@
 const { getUser, saveUser } = require('./storage');
 
 const defaults = {
-  autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, autoSellStrategy: 'takeProfit', killSwitch: false,
+  autoWatcherEnabled: false, paperTradingEnabled: true, autoSellEnabled: true, killSwitch: false,
   paperCapitalSol: 3, paperAvailableSol: 3, paperAllocationPct: 5,
   paperTakeProfitFirstPct: 30, paperStopLossPct: 15,
-  paperEvents: [], paperPnlSol: 0, liveTrading: false, tradeSizeSol: 0.1,
+  paperEvents: [], paperPnlSol: 0, liveTrading: false,
   maxTradesPerDay: 0, tradesToday: 0, tradeDay: new Date().toISOString().slice(0, 10),
   // لا نستبعد أي DEX افتراضيًا؛ التقييد يتم اختياريًا من واجهة الإعدادات.
   dex: { minAgeSec: 30, maxAgeSec: 0, minVolumeUsd: 0, minLiquidityUsd: 500, minBuys24h: 0, minBuySellRatio: 0, minMarketCapUsd: 0, maxMarketCapUsd: 0, allowedDexes: 'all', antiDuplicate: true },
@@ -24,6 +24,9 @@ function merge(base, value) {
 function getSettings(adminId, key) {
   const user = getUser(adminId, key);
   const settings = merge(defaults, user.settings);
+  // Remove legacy fields that no longer control any behavior.
+  delete settings.autoSellStrategy;
+  delete settings.tradeSizeSol;
   const today = new Date().toISOString().slice(0, 10);
   if (settings.tradeDay !== today) { settings.tradeDay = today; settings.tradesToday = 0; }
   // Legacy versions used the auto-buy button to flip paperTradingEnabled, which could leave an unsafe ambiguous state.
